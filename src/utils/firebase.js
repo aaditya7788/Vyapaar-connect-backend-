@@ -8,28 +8,28 @@ const initializeFirebase = () => {
     if (isInitialized) return admin;
 
     try {
-        // Path to the service account JSON
         let serviceAccount;
-        const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH 
-            ? path.resolve(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
-            : path.join(__dirname, '../config/firebase-service-account.json');
 
-        console.log(`🔍 Attempting to load Firebase service account from: ${serviceAccountPath}`);
-        
-        try {
-            serviceAccount = require(serviceAccountPath);
-        } catch (e) {
-            console.error(`❌ Could not find Firebase service account file at: ${serviceAccountPath}`);
-            // Fallback to environment variables if possible
-            if (process.env.FIREBASE_PRIVATE_KEY) {
-                console.log('🔄 Attempting to initialize Firebase using environment variables...');
-                serviceAccount = {
-                    projectId: process.env.FIREBASE_PROJECT_ID,
-                    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                };
-            } else {
-                throw new Error(`Firebase service account file missing and no backup environment variables found. Error: ${e.message}`);
+        // Priority 1: Use environment variables directly (Best for Production/Render)
+        if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL) {
+            console.log('🔐 Initializing Firebase Admin using environment variables...');
+            serviceAccount = {
+                projectId: process.env.FIREBASE_PROJECT_ID,
+                privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            };
+        } 
+        // Priority 2: Use service account JSON file (Local development fallback)
+        else {
+            const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH 
+                ? path.resolve(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
+                : path.join(__dirname, '../config/firebase-service-account.json');
+
+            console.log(`📂 Attempting to load Firebase service account from file: ${serviceAccountPath}`);
+            try {
+                serviceAccount = require(serviceAccountPath);
+            } catch (fileError) {
+                throw new Error(`Firebase credentials missing. Provide environment variables or a valid JSON file. (Error: ${fileError.message})`);
             }
         }
 
