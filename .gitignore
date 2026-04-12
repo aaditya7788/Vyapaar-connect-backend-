@@ -8,4 +8,7 @@ dist/
 build/
 .DS_Store
 .vscode/
+# Firebase secrets
+**/*firebase-service-account.json
+**/firebase-service-account.json
 firebase-service-account.json
