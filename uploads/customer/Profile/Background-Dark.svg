@@ -1,0 +1,105 @@
+<svg
+  viewBox="0 0 1664 1152"
+  xmlns="http://www.w3.org/2000/svg"
+>
+
+<defs>
+
+<filter id="panelShadow" x="-3%" y="-3%" width="106%" height="112%">
+<feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.45"/>
+</filter>
+
+<pattern id="grain" width="6" height="6" patternUnits="userSpaceOnUse">
+<circle cx="1" cy="1" r="0.7" fill="#ffffff" opacity="0.04"/>
+<circle cx="4" cy="3" r="0.6" fill="#ffffff" opacity="0.03"/>
+<circle cx="2" cy="5" r="0.5" fill="#ffffff" opacity="0.02"/>
+</pattern>
+
+<clipPath id="panelClip">
+<rect x="64" y="62" width="1536" height="1028" rx="70"/>
+</clipPath>
+
+</defs>
+
+
+
+
+
+<!-- Content inside panel -->
+<g clip-path="url(#panelClip)">
+
+<path
+d="M64 390 C 382 294, 1256 246, 1600 372 L1600 62 L64 62 Z"
+fill="#2a2a2d"
+opacity="0.9"
+/>
+
+<path
+d="M128 375 C 530 277, 1134 272, 1534 364"
+fill="none"
+stroke="#3a3a3f"
+stroke-width="3"
+opacity="0.7"
+/>
+
+</g>
+
+
+<!-- Floating dots -->
+<g opacity="0.55" fill="#5c6b61">
+<circle cx="366" cy="115" r="10"/>
+<circle cx="1540" cy="128" r="11"/>
+<circle cx="1588" cy="248" r="11" opacity="0.5"/>
+<circle cx="214" cy="336" r="10" opacity="0.45"/>
+<circle cx="1450" cy="334" r="11" opacity="0.48"/>
+</g>
+
+
+<!-- Icons -->
+<g transform="translate(166 138)" fill="#5e7165" opacity="0.9">
+<rect width="102" height="74" rx="4"/>
+<path d="M12 18h58l12 12H12z" fill="#9fb5a6" opacity="0.5"/>
+<path d="M60 44l10 12H50z" fill="#a9bfb0" opacity="0.45"/>
+</g>
+
+<g transform="translate(523 144)" fill="#60756a" opacity="0.9">
+<path d="M0 0h24v30l-12-8-12 8z"/>
+</g>
+
+<g transform="translate(1116 154)" fill="#5f7267" opacity="0.9">
+<path d="M36 0c21 0 38 17 38 39v22c0 9 6 15 14 17 2 1 3 3 2 5-1 3-3 4-6 4H-4c-3 0-6-2-7-4-1-2 0-4 2-5 8-2 13-8 13-17V39C4 17 20 0 36 0z"/>
+<circle cx="36" cy="22" r="6" fill="#b9cec0" opacity="0.55"/>
+<rect x="27" y="88" width="18" height="8" rx="4"/>
+</g>
+
+<g transform="translate(1240 138)" fill="#5f7267" opacity="0.9">
+<rect width="142" height="86" rx="2"/>
+<path d="M20 22h88l-8 16H12z" fill="#a4b9aa" opacity="0.45"/>
+<path d="M28 48h96l-8 16H20z" fill="#9fb3a5" opacity="0.4"/>
+</g>
+
+<g transform="translate(292 260)" opacity="0.9">
+<path
+d="M40 0c16 0 26 12 26 27 0 22-18 32-44 50C-4 59-22 49-22 27-22 12-12 0 4 0c9 0 14 3 18 9C26 3 31 0 40 0z"
+fill="#566c5f"
+/>
+<path
+d="M22 22l22 9-42 28 3-24z"
+fill="#a8c1b1"
+opacity="0.4"
+/>
+</g>
+
+
+<!-- Grain texture -->
+<rect
+x="64"
+y="62"
+width="1536"
+height="1028"
+rx="70"
+fill="url(#grain)"
+opacity="0.6"
+/>
+
+</svg>

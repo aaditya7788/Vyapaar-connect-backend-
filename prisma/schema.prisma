@@ -1,0 +1,386 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                String           @id @default(uuid())
+  phone             String           @unique
+  phoneVerified     Boolean          @default(false)
+  fullName          String?
+  email             String?          @unique
+  emailVerified     Boolean          @default(false)
+  avatar            String?          @default("/uploads/avatars/default.png")
+  customerId        String           @unique
+  providerId        String?          @unique
+  roles             String[]         @default(["customer"])
+  isProfileComplete Boolean          @default(false)
+  status            String           @default("active")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  bookings          Booking[]
+  addresses         UserAddress[]
+  providerProfile   ProviderProfile?
+  refreshTokens     RefreshToken[]
+  reviews           Review[]
+
+  // Wallet & Credit System
+  credits           UserCredits?
+  creditTransactions CreditTransaction[]
+  creditOrders       CreditOrder[]
+
+  // Push Notifications
+  pushTokens        PushToken[]
+}
+
+model PushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String?  // ios, android, web
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model UserCredits {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CreditTransaction {
+  id          String   @id @default(uuid())
+  userId      String
+  amount      Int      // Positive for credit (+), negative for debit (-)
+  type        String   // e.g., "PURCHASE", "USED", "REFUND", "BONUS"
+  description String?  // Optional context (e.g., "Payment for Booking #BK-9821")
+  
+  // Linkages
+  bookingId   String?
+  orderId     String?  @unique
+  status      String   @default("SUCCESS") // SUCCESS, FAILED
+  
+  metadata    Json?    // For external IDs or any extra data
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking     Booking? @relation(fields: [bookingId], references: [id])
+
+  @@index([userId])
+  @@index([bookingId])
+}
+
+model CreditOrder {
+  id              String   @id @default(uuid())
+  userId          String
+  planId          String   // References selected plan (50, 100, 250 credits, etc.)
+  currency        String   @default("INR")
+  amount          Float    // Monetary amount (e.g., 199.00)
+  status          String   @default("created") // "created", "paid", "failed"
+  razorpayOrderId String?  @unique
+  paymentId       String?  @unique
+  signature       String?
+  metadata        Json?    // Optional extra data (coupons, discounts, etc.)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([razorpayOrderId])
+}
+
+model ProviderProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shops     Shop[]
+}
+
+model Category {
+  id            String        @id @default(uuid())
+  name          String        @unique
+  icon          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  isVisible     Boolean       @default(true)
+  order         Int           @default(0)
+  subcategories Subcategory[]
+}
+
+model Subcategory {
+  id         String   @id @default(uuid())
+  name       String
+  icon       String?
+  categoryId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  isVisible  Boolean  @default(true)
+  order      Int      @default(0)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([name, categoryId])
+}
+
+model Shop {
+  id                String          @id @default(uuid())
+  name              String
+  address           String
+  experience        String?
+  profileImage      String?
+  backgroundImages  String[]        @default([])
+  status            String          @default("PENDING")
+  providerProfileId String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  businessSummary   String?
+  category          String?
+  subcategories     String[]        @default([])
+  facilities        String[]        @default([])
+  serviceType       String?         @default("in-house")
+  tags              String[]        @default([])
+  whyChooseUs       String?
+  workingDays       String[]        @default(["mon", "tue", "wed", "thu", "fri"])
+  workingHoursEnd   String?         @default("06:00 PM")
+  workingHoursStart String?         @default("09:00 AM")
+  serviceArea       String?
+  latitude          Float?
+  longitude         Float?
+  rejectionReason   String?
+  verifiedAt        DateTime?
+  communityType     String?         @default("runwal")
+  communityId       String?
+  averageRating     Float           @default(0)
+  reviewCount       Int             @default(0)
+  services          Service[]
+  bookings          Booking[]
+  reviews           Review[]
+  community         Community?      @relation(fields: [communityId], references: [id])
+  providerProfile   ProviderProfile @relation(fields: [providerProfileId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Service {
+  id            String    @id @default(uuid())
+  name          String
+  description   String?
+  price         Float
+  duration      String
+  category      String?
+  subcategories String[]  @default([])
+  inclusions    String[]  @default([])
+  isActive      Boolean   @default(true)
+  image         String?
+  shopId        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  isFeatured    Boolean   @default(false)
+  averageRating Float     @default(0)
+  reviewCount   Int       @default(0)
+  bookings      Booking[]
+  serviceRatings ServiceRating[]
+  shop          Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Advertisement {
+  id        String    @id @default(uuid())
+  title     String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  type      String    @default("IMAGE") // IMAGE or TEXT
+  image     String?   // URL for IMAGE type
+  
+  // High-fidelity Text Layout fields
+  headline  String?
+  subText   String?
+  badge     String?
+  btnLabel  String?   @default("Book Now")
+  bgFrom    String?   @default("#FFFFFF")
+  accent    String?   @default("#000000")
+  sharpCorners Boolean @default(false)
+  showTitle    Boolean @default(true)
+  titleColor   String? @default("#FFFFFF")
+  
+  // Deep-Link Engine
+  link        String?   // Raw link or generated deep link
+  targetId    String?   // ID of category or shop
+  targetType  String?   // "CATEGORY" or "SHOP"
+
+  endDate   DateTime?
+  order     Int       @default(0)
+  position  String    @default("HOME_TOP")
+  startDate DateTime?
+}
+
+model Booking {
+  id              String        @id @default(uuid())
+  displayId       String?       @unique // Human-readable ID (e.g. BK-7A1B2C)
+  userId          String
+  shopId          String
+  addressId       String
+  scheduledDate   DateTime
+  scheduledTime   String
+  status          BookingStatus @default(PENDING)
+  otp             String?       // Start Verification
+  completionOtp   String?       // End Verification
+  totalAmount     Float         @default(0)
+  creditFeePaid   Boolean       @default(false)
+  creditFeeAmount Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  services        Service[]     // Many-to-Many relationship
+  user            User          @relation(fields: [userId], references: [id])
+  shop            Shop          @relation(fields: [shopId], references: [id])
+  address         UserAddress   @relation(fields: [addressId], references: [id])
+  creditTransactions CreditTransaction[]
+  review          Review?
+}
+
+model UserAddress {
+  id        String   @id @default(uuid())
+  userId    String
+  label     String   // e.g. Home, Office, Other
+  icon      String   @default("home")
+  address   String   // The full address string
+  area      String?
+  landmark  String?
+  latitude  Float?
+  longitude Float?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+}
+
+model Community {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  description String?
+  svgName     String?
+  bgColor     String?  @default("#E8F5E9")
+  textColor   String?  @default("#2E7D32")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  shops       Shop[]
+}
+
+enum Role {
+  CUSTOMER
+  PROVIDER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DECLINED
+  EXPIRED
+}
+
+model CreditPlan {
+  id            String   @id @default(uuid())
+  credits       Int
+  price         Float
+  label         String?
+  popular       Boolean   @default(false)
+  savings       String?
+  validityDays  Int       @default(365)
+  isActive      Boolean   @default(true)
+  startDate     DateTime?
+  endDate       DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  type            String    @default("PERCENT") // PERCENT or FIXED
+  discount        Float
+  minAmount       Float?    @default(0)
+  usageLimit      Int?      // Total times this coupon can be used overall
+  usedCount       Int       @default(0)
+  isActive        Boolean   @default(true)
+  isRedeemable    Boolean   @default(false) // If true, applying adds credits directly
+  creditsAwarded  Int?      // Credits added if isRedeemable is true
+  targetUserId    String?   // If set, only this user can use it
+  startDate       DateTime? @default(now())
+  expiryDate      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model GlobalSettings {
+  id        String   @id @default(uuid())
+  key       String   @unique // e.g., "booking_accept_fee", "booking_complete_fee"
+  value     String   // Value stored as string, cast as needed
+  type      String   @default("number") // number, string, boolean, json
+  label     String?  // Human readable name for Admin panel
+  updatedAt DateTime @updatedAt
+}
+
+model Review {
+  id              String          @id @default(uuid())
+  bookingId       String          @unique
+  userId          String
+  shopId          String
+  overallRating   Float
+  comment         String?
+  tags            String[]        @default([])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  serviceRatings  ServiceRating[]
+
+  @@index([userId])
+  @@index([shopId])
+}
+
+model ServiceRating {
+  id          String   @id @default(uuid())
+  reviewId    String
+  serviceId   String
+  rating      Float
+  comment     String?
+  createdAt   DateTime @default(now())
+  
+  review      Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, serviceId])
+  @@index([serviceId])
+}
+
