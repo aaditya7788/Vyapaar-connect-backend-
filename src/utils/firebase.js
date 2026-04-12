@@ -47,11 +47,20 @@ const initializeFirebase = () => {
         }
 
         if (serviceAccount) {
-            // Sanitize the private key - this is a common source of ASN.1 parsing errors
-            if (serviceAccount.private_key) {
-                serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n').trim();
-            } else if (serviceAccount.privateKey) {
-                serviceAccount.privateKey = serviceAccount.privateKey.replace(/\\n/g, '\n').trim();
+            let key = serviceAccount.private_key || serviceAccount.privateKey;
+            if (key) {
+                // Remove literal \n, quotes, and trim whitespace/newlines
+                key = key.replace(/\\n/g, '\n').replace(/"/g, '').trim();
+                
+                // If the key is one giant line, we must ensure it has proper newlines for the parser
+                if (!key.includes('\n')) {
+                    console.log('⚠️ Firebase key format fixed: Added missing newlines');
+                    key = key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+                             .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+                }
+                
+                if (serviceAccount.private_key) serviceAccount.private_key = key;
+                else if (serviceAccount.privateKey) serviceAccount.privateKey = key;
             }
         }
 
