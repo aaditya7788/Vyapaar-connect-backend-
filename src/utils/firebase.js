@@ -46,6 +46,15 @@ const initializeFirebase = () => {
             }
         }
 
+        if (serviceAccount) {
+            // Sanitize the private key - this is a common source of ASN.1 parsing errors
+            if (serviceAccount.private_key) {
+                serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n').trim();
+            } else if (serviceAccount.privateKey) {
+                serviceAccount.privateKey = serviceAccount.privateKey.replace(/\\n/g, '\n').trim();
+            }
+        }
+
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount)
         });
