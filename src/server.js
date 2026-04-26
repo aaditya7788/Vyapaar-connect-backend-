@@ -3,7 +3,9 @@ const http = require('http');
 const app = require('./app');
 const socketUtils = require('./utils/socket');
 
-const PORT = process.env.PORT || 5000;
+const env = require('./config/env');
+
+const PORT = env.PORT || 5000;
 
 // Create HTTP Server
 const server = http.createServer(app);
@@ -16,5 +18,5 @@ const { initializeFirebase } = require('./utils/firebase');
 initializeFirebase();
 
 server.listen(PORT, () => {
-    console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+    console.log(`🚀 Server running in ${env.APP_ENV.toUpperCase()} mode on port ${PORT}`);
 });

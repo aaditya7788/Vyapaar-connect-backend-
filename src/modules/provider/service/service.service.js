@@ -1,4 +1,5 @@
 const prisma = require('../../../db');
+const { deleteFile } = require('../../../utils/file.utils');
 
 /**
  * Resolve Category and Subcategory (No longer uses IDs)
@@ -67,12 +68,38 @@ const createService = async (serviceData) => {
 
 /**
  * Get all services for a specific shop
+ * Smart Filter: Only the shop owner can see Inactive/Disabled services
  */
-const getServicesByShop = async (shopId) => {
+const getServicesByShop = async (shopId, requestingUserId = null) => {
+    let isOwner = false;
+
+    // 1. Initial Identity Check & Ownership Verify
+    if (requestingUserId) {
+        // Find if this user owns this specific shop
+        const shop = await prisma.shop.findFirst({
+            where: {
+                id: shopId,
+                providerProfile: {
+                    userId: requestingUserId
+                }
+            }
+        });
+        isOwner = !!shop;
+    }
+
+    // 2. Build explicit where clause
+    const where = { shopId };
+    
+    // If not the owner, strictly filter for Active services only
+    if (!isOwner) {
+        where.isActive = true;
+    }
+
     const services = await prisma.service.findMany({
-        where: { shopId },
+        where,
         orderBy: { name: 'asc' }
     });
+    
     return services.map(mapServiceCategories);
 };
 
@@ -90,11 +117,20 @@ const getServiceById = async (id) => {
  * Update an existing service
  */
 const updateService = async (id, serviceData) => {
+    // Get existing to check for image changes
+    const existing = await prisma.service.findUnique({ where: { id } });
+    
     const data = await CLEAN_DATA(serviceData);
     const service = await prisma.service.update({
         where: { id },
         data
     });
+
+    // Cleanup old image if replaced
+    if (existing && data.image && existing.image && data.image !== existing.image) {
+        deleteFile(existing.image);
+    }
+
     return mapServiceCategories(service);
 };
 
@@ -102,9 +138,17 @@ const updateService = async (id, serviceData) => {
  * Delete a service
  */
 const deleteService = async (id) => {
-    return await prisma.service.delete({
+    const existing = await prisma.service.findUnique({ where: { id } });
+    
+    const deleted = await prisma.service.delete({
         where: { id }
     });
+
+    if (existing && existing.image) {
+        deleteFile(existing.image);
+    }
+
+    return deleted;
 };
 
 /**
@@ -118,11 +162,31 @@ const toggleServiceStatus = async (id, isActive) => {
     return mapServiceCategories(service);
 };
 
+/**
+ * Check availability for a list of service IDs
+ */
+const checkAvailability = async (serviceIds) => {
+    if (!Array.isArray(serviceIds) || serviceIds.length === 0) return [];
+
+    const services = await prisma.service.findMany({
+        where: {
+            id: { in: serviceIds }
+        },
+        select: {
+            id: true,
+            isActive: true
+        }
+    });
+
+    return services;
+};
+
 module.exports = {
     createService,
     getServicesByShop,
     getServiceById,
     updateService,
     deleteService,
-    toggleServiceStatus
+    toggleServiceStatus,
+    checkAvailability
 };

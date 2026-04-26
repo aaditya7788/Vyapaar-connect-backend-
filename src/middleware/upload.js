@@ -11,22 +11,7 @@ const ensureDir = (dir) => {
   }
 };
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Determine folder from request (e.g. from a previous middleware or field)
-    const folder = req.uploadFolder || 'uploads/common';
-    ensureDir(folder);
-    cb(null, folder);
-  },
-  filename: (req, file, cb) => {
-    // Priority: use custom filename from query if provided
-    let name = req.query.filename || uuidv4();
-    // Clean filename (remove non-alphanumeric except underscore/hyphen)
-    name = name.toLowerCase().replace(/[^a-z0-9_\-]/g, '_');
-    
-    cb(null, `${name}${path.extname(file.originalname)}`);
-  }
-});
+const storage = multer.memoryStorage();
 
 
 const fileFilter = (req, file, cb) => {

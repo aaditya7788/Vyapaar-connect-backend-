@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.vyapaar.connect",
+      "sha256_cert_fingerprints": [
+        "43:69:2B:3B:04:D6:39:E1:85:B2:0A:26:98:2F:86:5C:8E:E5:8B:6E:48:5E:16:D9:99:DF:C9:65:85:23:4F:AC"
+      ]
+    }
+  }
+]

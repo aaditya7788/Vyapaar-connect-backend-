@@ -14,9 +14,9 @@ const { upload } = require('../../../middleware/upload');
 router.post('/upload', 
   authMiddleware, 
   (req, res, next) => {
-    const subfolder = req.query.subfolder || '';
-    // Construct path: uploads/common + optional subfolder
-    req.uploadFolder = path.join('uploads/common', subfolder).replace(/\\/g, '/');
+    const { domain = 'shared', type = 'others' } = req.query;
+    // Construct systematic path
+    req.uploadFolder = `uploads/${domain}/${type}`;
     next();
   },
   upload.single('file'), 
@@ -25,14 +25,30 @@ router.post('/upload',
 
 /**
  * @route   POST /api/common/upload/category
- * @desc    Dedicated upload for categories/subcategories to uploads/shared/services
+ * @desc    Dedicated upload for categories to uploads/shared/categories
  * @access  Private
  */
 router.post('/upload/category',
   authMiddleware,
   adminMiddleware,
   (req, res, next) => {
-    req.uploadFolder = 'uploads/shared/services';
+    req.uploadFolder = 'uploads/shared/categories';
+    next();
+  },
+  upload.single('file'),
+  commonController.uploadSingle
+);
+
+/**
+ * @route   POST /api/common/upload/mascot
+ * @desc    Dedicated upload for category mascots to uploads/shared/categories-mascot
+ * @access  Private
+ */
+router.post('/upload/mascot',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => {
+    req.uploadFolder = 'uploads/shared/categories-mascot';
     next();
   },
   upload.single('file'),
@@ -42,14 +58,14 @@ router.post('/upload/category',
 
 /**
  * @route   POST /api/common/upload/ad
- * @desc    Dedicated upload for Home Page Advertisements to uploads/ads
+ * @desc    Dedicated upload for Home Page Advertisements to uploads/shared/ads
  * @access  Private
  */
 router.post('/upload/ad',
   authMiddleware,
   adminMiddleware,
   (req, res, next) => {
-    req.uploadFolder = 'uploads/ads';
+    req.uploadFolder = 'uploads/shared/ads';
     next();
   },
   upload.single('file'),

@@ -1,6 +1,7 @@
 const prisma = require('../../../db');
 const { generateId, generateAccessToken } = require('../../../utils/auth.utils');
 const communityService = require('../../common/community/community.service');
+const { deleteFile, deleteFiles } = require('../../../utils/file.utils');
 
 /**
  * Resolve Community ID from ID, slug or type
@@ -109,6 +110,8 @@ const onboardProvider = async (userId, shopData) => {
       const shop = await tx.shop.create({
         data: {
           name: shopData.name || "Untitled Shop",
+          houseNo: shopData.houseNo || null,
+          area: shopData.area || null,
           address: shopData.address || "Address Pending",
           experience: String(shopData.experience || ""),
           profileImage: shopData.profileImage || null,
@@ -129,6 +132,7 @@ const onboardProvider = async (userId, shopData) => {
           workingHoursEnd: shopData.workingHoursEnd || '06:00 PM',
           workingDays: shopData.workingDays || ['mon', 'tue', 'wed', 'thu', 'fri'],
           facilities: shopData.facilities || [],
+          gallery: shopData.gallery || [],
         },
       }).then(mapShopCategories);
 
@@ -144,7 +148,12 @@ const onboardProvider = async (userId, shopData) => {
         accessToken,
         user: {
           id: activeUser.id,
+          fullName: activeUser.fullName,
+          email: activeUser.email,
+          avatar: activeUser.avatar,
+          isProfileComplete: activeUser.isProfileComplete,
           roles: activeUser.roles,
+          customerId: activeUser.customerId,
           providerId: activeUser.providerId,
         },
         shop,
@@ -177,6 +186,8 @@ const createShop = async (userId, shopData) => {
   const shop = await prisma.shop.create({
     data: {
       name: shopData.name,
+      houseNo: shopData.houseNo || null,
+      area: shopData.area || null,
       address: shopData.address,
       experience: String(shopData.experience || ""),
       profileImage: shopData.profileImage,
@@ -195,6 +206,7 @@ const createShop = async (userId, shopData) => {
       workingHoursEnd: shopData.workingHoursEnd,
       workingDays: shopData.workingDays || [],
       facilities: shopData.facilities || [],
+      gallery: shopData.gallery || [],
       providerProfileId: profile.id,
     },
   }).then(mapShopCategories);
@@ -232,10 +244,10 @@ const updateShop = async (userId, shopId, shopData) => {
   // Selective update - keep existing values if incoming is undefined
   const updateData = {};
   const fields = [
-      'name', 'address', 'experience', 'profileImage', 'backgroundImages', 
+      'name', 'address', 'houseNo', 'area', 'experience', 'profileImage', 'backgroundImages', 
       'serviceType', 'serviceArea', 'businessSummary', 'whyChooseUs', 
       'tags', 'latitude', 'longitude', 'workingHoursStart', 'workingHoursEnd', 
-      'workingDays', 'facilities', 'status'
+      'workingDays', 'facilities', 'status', 'gallery'
   ];
 
   fields.forEach(f => {
@@ -257,6 +269,21 @@ const updateShop = async (userId, shopId, shopData) => {
     where: { id: shopId },
     data: updateData,
   }).then(mapShopCategories);
+
+  // cleanup old images if they were replaced
+  if (updateData.profileImage && existingShop.profileImage && updateData.profileImage !== existingShop.profileImage) {
+      deleteFile(existingShop.profileImage);
+  }
+
+  if (updateData.backgroundImages && Array.isArray(existingShop.backgroundImages)) {
+      const removedBgs = existingShop.backgroundImages.filter(oldBg => !updateData.backgroundImages.includes(oldBg));
+      deleteFiles(removedBgs);
+  }
+
+  if (updateData.gallery && Array.isArray(existingShop.gallery)) {
+      const removedGallery = existingShop.gallery.filter(oldImg => !updateData.gallery.includes(oldImg));
+      deleteFiles(removedGallery);
+  }
 
   return updatedShop;
 };
@@ -281,7 +308,7 @@ const getShopsByUserId = async (userId) => {
 /**
  * Get Single Shop by ID
  */
-const getShopById = async (shopId) => {
+const getShopById = async (shopId, userId = null) => {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
     include: {
@@ -301,10 +328,36 @@ const getShopById = async (shopId) => {
             select: { fullName: true, avatar: true }
           }
         }
-      }
+      },
+      ...(userId ? {
+        recommendations: {
+          where: { userId },
+          select: { status: true }
+        }
+      } : {})
     }
   });
   if (!shop) throw new Error('Shop not found');
+
+  // Attach Category Settings for Admin Control (Phase 13)
+  if (shop.category) {
+    const categoryName = shop.category.trim();
+    const categorySettings = await prisma.category.findFirst({
+      where: { 
+        name: {
+          equals: categoryName,
+          mode: 'insensitive'
+        }
+      }
+    });
+    if (categorySettings) {
+      shop.categorySettings = {
+        supportsQuantity: categorySettings.supportsQuantity,
+        mascotImage: categorySettings.mascotImage
+      };
+    }
+  }
+
   return mapShopCategories(shop);
 };
 
@@ -355,6 +408,53 @@ const updateShopStatus = async (userId, shopId, { status, rejectionReason }) => 
   return mapShopCategories(shop);
 };
 
+/**
+ * Add an image to the shop gallery
+ */
+const addGalleryImage = async (userId, shopId, imageUrl) => {
+  const profile = await prisma.providerProfile.findUnique({ where: { userId } });
+  if (!profile) throw new Error('Provider not found');
+
+  const shop = await prisma.shop.update({
+    where: { id: shopId, providerProfileId: profile.id },
+    data: {
+      gallery: {
+        push: imageUrl
+      }
+    }
+  });
+
+  return mapShopCategories(shop);
+};
+
+/**
+ * Remove an image from the shop gallery
+ */
+const removeGalleryImage = async (userId, shopId, imageUrl) => {
+  const profile = await prisma.providerProfile.findUnique({ where: { userId } });
+  if (!profile) throw new Error('Provider not found');
+
+  const existingShop = await prisma.shop.findFirst({
+    where: { id: shopId, providerProfileId: profile.id }
+  });
+
+  if (!existingShop) throw new Error('Shop not found');
+
+  const updatedGallery = existingShop.gallery.filter(img => img !== imageUrl);
+
+  const shop = await prisma.shop.update({
+     where: { id: shopId },
+     data: {
+       gallery: updatedGallery
+     }
+  });
+
+  // Cleanup file from storage
+  deleteFile(imageUrl);
+
+  return mapShopCategories(shop);
+};
+
 module.exports = {
   onboardProvider,
   createShop,
@@ -364,6 +464,8 @@ module.exports = {
   updateShopStatus,
   deleteShop,
   getProviderDashboardStats,
+  addGalleryImage,
+  removeGalleryImage,
 };
 
 /**
@@ -408,6 +510,19 @@ async function getProviderDashboardStats(userId, shopId) {
     },
     _sum: {
       totalAmount: true,
+    },
+  });
+
+  // Count All Jobs (Total history)
+  const totalJobsCount = await prisma.booking.count({
+    where: { shopId },
+  });
+
+  // Count Completed Jobs (All time)
+  const completedJobsCount = await prisma.booking.count({
+    where: {
+      shopId,
+      status: 'COMPLETED',
     },
   });
 
@@ -472,9 +587,12 @@ async function getProviderDashboardStats(userId, shopId) {
   });
 
   return {
+    version: 'v2',
     todayEarnings: completedToday._sum.totalAmount || 0,
     yesterdayEarnings: completedYesterday._sum.totalAmount || 0,
     activeJobs: activeJobsCount,
+    totalJobs: totalJobsCount,
+    completedJobs: completedJobsCount,
     pendingRequests: pendingRequestsCount,
     walletBalance: wallet?.balance || 0,
     rating: shop.averageRating || 0,

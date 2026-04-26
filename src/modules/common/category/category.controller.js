@@ -1,5 +1,6 @@
 const categoryService = require('./category.service');
 const response = require('../../../utils/response');
+const { uploadToS3 } = require('../../../utils/s3Service');
 
 /**
  * Get all categories with subcategories
@@ -36,11 +37,32 @@ const getCategory = async (req, res) => {
  */
 const createCategory = async (req, res) => {
     try {
-        const { name, icon } = req.body;
+        const { name, icon, supportsQuantity, mascotImage, startOtpRequired } = req.body;
         if (!name) return response.error(res, 'Name is required', 'VALIDATION_ERROR', 400);
-        const category = await categoryService.createCategory({ name, icon });
+
+        let iconUrl = icon;
+        let mascotImageUrl = mascotImage;
+
+        // Handle File Uploads to S3
+        if (req.files) {
+            if (req.files.icon?.[0]) {
+                iconUrl = await uploadToS3(req.files.icon[0].buffer, req.files.icon[0].originalname, 'categories/icons');
+            }
+            if (req.files.mascotImage?.[0]) {
+                mascotImageUrl = await uploadToS3(req.files.mascotImage[0].buffer, req.files.mascotImage[0].originalname, 'categories/mascots');
+            }
+        }
+
+        const category = await categoryService.createCategory({ 
+            name, 
+            icon: iconUrl, 
+            supportsQuantity: supportsQuantity === 'true' || supportsQuantity === true, 
+            mascotImage: mascotImageUrl, 
+            startOtpRequired: startOtpRequired === 'true' || startOtpRequired === true
+        });
         return response.success(res, 'Category created', category, 201);
     } catch (error) {
+        console.error('[CATEGORY CREATE ERROR]:', error);
         return response.error(res, 'Failed to create category');
     }
 };
@@ -51,9 +73,30 @@ const createCategory = async (req, res) => {
 const updateCategory = async (req, res) => {
     try {
         const { id } = req.params;
-        const category = await categoryService.updateCategory(id, req.body);
+        const updateData = { ...req.body };
+
+        // Handle Type Conversions for FormData
+        if (updateData.supportsQuantity !== undefined) {
+            updateData.supportsQuantity = updateData.supportsQuantity === 'true' || updateData.supportsQuantity === true;
+        }
+        if (updateData.startOtpRequired !== undefined) {
+            updateData.startOtpRequired = updateData.startOtpRequired === 'true' || updateData.startOtpRequired === true;
+        }
+
+        // Handle File Uploads to S3
+        if (req.files) {
+            if (req.files.icon?.[0]) {
+                updateData.icon = await uploadToS3(req.files.icon[0].buffer, req.files.icon[0].originalname, 'categories/icons');
+            }
+            if (req.files.mascotImage?.[0]) {
+                updateData.mascotImage = await uploadToS3(req.files.mascotImage[0].buffer, req.files.mascotImage[0].originalname, 'categories/mascots');
+            }
+        }
+
+        const category = await categoryService.updateCategory(id, updateData);
         return response.success(res, 'Category updated', category);
     } catch (error) {
+        console.error('[CATEGORY UPDATE ERROR]:', error);
         return response.error(res, 'Failed to update category');
     }
 };

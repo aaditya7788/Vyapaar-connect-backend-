@@ -28,11 +28,11 @@ const generateId = async (prefix, field) => {
  * Generate an Access Token
  * Payload includes userId and roles array.
  */
-const generateAccessToken = (user) => {
+const generateAccessToken = (user, sessionId = null) => {
   return jwt.sign(
-    { userId: user.id, roles: user.roles, type: 'access' },
+    { userId: user.id, roles: user.roles, sessionId, type: 'access' },
     env.ACCESS_TOKEN_SECRET,
-    { expiresIn: '30m' }
+    { expiresIn: env.JWT_EXPIRE || '7d' }
   );
 };
 

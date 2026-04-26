@@ -1,11 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const serviceController = require('./service.controller');
+const { authMiddleware, optionalAuthMiddleware } = require('../../../middleware/auth.middleware');
 
 /**
  * List services for a specific shop
  */
-router.get('/shop/:shopId', serviceController.getShopServices);
+router.get('/shop/:shopId', optionalAuthMiddleware, serviceController.getShopServices);
+
+/**
+ * Check multiple services' availability status
+ */
+router.post('/availability', serviceController.checkAvailability);
 
 /**
  * Create a new service

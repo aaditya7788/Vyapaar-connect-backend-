@@ -1,5 +1,11 @@
 const bookingService = require('./booking.service');
 
+/**
+ * TITLE: Global Booking Controller
+ * DESCRIPTION: Handles the core booking lifecycle, including creation, listing, status updates, 
+ * and detail retrieval for both customers and providers. It acts as the central hub 
+ * for all transactional service requests.
+ */
 class BookingController {
     /**
      * Create multiple bookings from a cart bucket
@@ -36,10 +42,15 @@ class BookingController {
                 return res.status(400).json({ error: 'shopId is required' });
             }
 
-            const bookings = await bookingService.getProviderBookings(userId, shopId);
-            res.status(200).json({ status: 'success', data: bookings });
+            const bookings = await bookingService.getProviderBookings(userId, shopId, req.query);
+            res.status(200).json({ status: 'success', ...bookings });
         } catch (error) {
             console.error('Provider booking fetch error:', error);
+            
+            if (error.message === 'Unauthorized or shop not found') {
+                return res.status(error.message.includes('found') ? 404 : 403).json({ error: error.message });
+            }
+            
             res.status(500).json({ error: error.message || 'Error fetching bookings' });
         }
     }
@@ -50,8 +61,8 @@ class BookingController {
     async list(req, res) {
         try {
             const userId = req.user.id;
-            const bookings = await bookingService.getCustomerBookings(userId);
-            res.status(200).json({ status: 'success', data: bookings });
+            const bookings = await bookingService.getCustomerBookings(userId, req.query);
+            res.status(200).json({ status: 'success', ...bookings });
         } catch (error) {
             console.error('Booking fetch error:', error);
             res.status(500).json({ error: 'Error fetching bookings' });
@@ -92,6 +103,21 @@ class BookingController {
         } catch (error) {
             console.error('Booking status update error:', error);
             res.status(400).json({ error: error.message || 'Error updating status' });
+        }
+    }
+
+    /**
+     * POST /booking/retry/:id
+     * Retry an expired booking
+     */
+    async retryBooking(req, res) {
+        try {
+            const { id } = req.params;
+            const booking = await bookingService.retryBooking(id, req.user.id);
+            res.status(200).json({ status: 'success', data: booking });
+        } catch (error) {
+            console.error('Booking retry error:', error);
+            res.status(400).json({ error: error.message || 'Error retrying booking' });
         }
     }
 }

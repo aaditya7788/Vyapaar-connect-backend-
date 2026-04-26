@@ -1,6 +1,12 @@
 const prisma = require('../../../db');
 
 /**
+ * TITLE: Customer Address Controller
+ * DESCRIPTION: Manages user delivery/service addresses, including geocoding validation, 
+ * default address selection, and CRUD operations for personal locations.
+ */
+
+/**
  * Get all addresses of the logged-in user
  */
 const getAddresses = async (req, res) => {
@@ -21,7 +27,7 @@ const getAddresses = async (req, res) => {
  */
 const createAddress = async (req, res) => {
     try {
-        const { label, icon, address, area, landmark, latitude, longitude, isDefault } = req.body;
+        const { label, name, icon, address, area, landmark, latitude, longitude, isDefault } = req.body;
 
         // If this is set as default, unset others first
         if (isDefault) {
@@ -35,6 +41,7 @@ const createAddress = async (req, res) => {
             data: {
                 userId: req.user.id,
                 label,
+                name,
                 icon: icon || 'home',
                 address,
                 area,
@@ -57,7 +64,7 @@ const createAddress = async (req, res) => {
 const updateAddress = async (req, res) => {
     try {
         const { id } = req.params;
-        const { label, icon, address, area, landmark, latitude, longitude, isDefault } = req.body;
+        const { label, name, icon, address, area, landmark, latitude, longitude, isDefault } = req.body;
 
         // Verify ownership
         const existing = await prisma.userAddress.findUnique({ where: { id } });
@@ -76,6 +83,7 @@ const updateAddress = async (req, res) => {
             where: { id },
             data: {
                 label,
+                name,
                 icon,
                 address,
                 area,
@@ -105,9 +113,14 @@ const deleteAddress = async (req, res) => {
             return res.status(403).json({ status: 'fail', message: 'Unauthorized' });
         }
 
+        // Deletion is now safe because address snapshots in Booking model (addressData) 
+        // preserve history even if the source address is deleted.
+        // The foreign key is set to onDelete: SetNull in schema.prisma.
+
         await prisma.userAddress.delete({ where: { id } });
         res.status(200).json({ status: 'success', message: 'Address deleted' });
     } catch (error) {
+        console.error('[DELETE ADDRESS ERROR]:', error);
         res.status(500).json({ status: 'error', message: error.message });
     }
 };

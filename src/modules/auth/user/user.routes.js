@@ -25,7 +25,7 @@ router.put('/profile', authMiddleware, userController.updateProfile);
  */
 router.post('/avatar', 
   authMiddleware, 
-  (req, res, next) => { req.uploadFolder = 'uploads/avatars'; next(); },
+  (req, res, next) => { req.uploadFolder = 'uploads/customer/avatars'; next(); },
   upload.single('avatar'), 
   userController.updateAvatar
 );
@@ -36,5 +36,26 @@ router.post('/avatar',
  * @access  Private
  */
 router.post('/push-token', authMiddleware, userController.registerPushToken);
+
+/**
+ * @route   GET /api/user/notifications
+ * @desc    Get user notification history
+ * @access  Private
+ */
+router.get('/notifications', authMiddleware, userController.getNotifications);
+
+/**
+ * @route   PUT /api/user/notifications/read
+ * @desc    Mark all notifications as read
+ * @access  Private
+ */
+router.put('/notifications/read', authMiddleware, userController.markNotificationsRead);
+
+/**
+ * @route   DELETE /api/user/notifications/:id
+ * @desc    Delete a specific notification
+ * @access  Private
+ */
+router.delete('/notifications/:id', authMiddleware, userController.deleteNotification);
 
 module.exports = router;

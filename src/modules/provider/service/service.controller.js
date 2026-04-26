@@ -30,7 +30,7 @@ const getShopServices = async (req, res) => {
             return response.error(res, 'Shop ID is required', 'VALIDATION_ERROR', 400);
         }
 
-        const services = await serviceService.getServicesByShop(shopId);
+        const services = await serviceService.getServicesByShop(shopId, req.user?.id);
         return response.success(res, 'Services fetched successfully', services);
     } catch (error) {
         console.error('[SERVICE CONTROLLER ERROR (FETCH)]:', error);
@@ -67,6 +67,24 @@ const deleteService = async (req, res) => {
 };
 
 /**
+ * Check availability for multiple services
+ */
+const checkAvailability = async (req, res) => {
+    try {
+        const { serviceIds } = req.body;
+        if (!serviceIds || !Array.isArray(serviceIds)) {
+            return response.error(res, 'serviceIds array is required', 'VALIDATION_ERROR', 400);
+        }
+
+        const availability = await serviceService.checkAvailability(serviceIds);
+        return response.success(res, 'Availability status fetched', availability);
+    } catch (error) {
+        console.error('[SERVICE CONTROLLER ERROR (AVAILABILITY)]:', error);
+        return response.error(res, 'Failed to check availability');
+    }
+};
+
+/**
  * Toggle service active/inactive status
  */
 const toggleStatus = async (req, res) => {
@@ -86,5 +104,6 @@ module.exports = {
     getShopServices,
     updateService,
     deleteService,
-    toggleStatus
+    toggleStatus,
+    checkAvailability
 };

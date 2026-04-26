@@ -2,12 +2,15 @@ node_modules/
 .env
 .env.*
 !.env.example
+uploads/
+scratch/
 logs/
 *.log
 dist/
 build/
 .DS_Store
 .vscode/
+
 # Firebase secrets
 **/*firebase-service-account.json
 **/firebase-service-account.json

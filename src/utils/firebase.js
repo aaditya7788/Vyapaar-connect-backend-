@@ -8,60 +8,64 @@ const initializeFirebase = () => {
     if (isInitialized) return admin;
 
     try {
-        // Path to the service account JSON
         let serviceAccount;
-        let serviceAccountPath;
-        
-        const possiblePaths = [
-            process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
-            path.join(process.cwd(), 'src/config/firebase-service-account.json'),
-            path.join(process.cwd(), 'backend/src/config/firebase-service-account.json'),
-            path.join(__dirname, '../config/firebase-service-account.json')
-        ].filter(Boolean);
 
-        for (const p of possiblePaths) {
-            const resolvedPath = path.resolve(p);
-            try {
-                serviceAccount = require(resolvedPath);
-                serviceAccountPath = resolvedPath;
-                console.log(`✅ Loaded Firebase service account from: ${resolvedPath}`);
-                break;
-            } catch (e) {
-                // Continue to next path
-            }
-        }
-        
-        if (!serviceAccount) {
-            console.error(`❌ Could not find Firebase service account file in any of: ${possiblePaths.join(', ')}`);
-            // Fallback to environment variables if possible
-            if (process.env.FIREBASE_PRIVATE_KEY) {
-                console.log('🔄 Attempting to initialize Firebase using environment variables...');
-                serviceAccount = {
-                    projectId: process.env.FIREBASE_PROJECT_ID,
-                    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                };
-            } else {
-                throw new Error(`Firebase service account file missing and no backup environment variables found.`);
-            }
-        }
+        // 1. Try Environment Variables first (Recommended for Production/Render)
+        if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL) {
+            console.log('🔄 Initializing Firebase using Environment Variables...');
+            serviceAccount = {
+                projectId: process.env.FIREBASE_PROJECT_ID,
+                privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            };
+        } 
+        // 2. Fallback to Service Account JSON files
+        else {
+            const possiblePaths = [
+                path.join(process.cwd(), 'src/config/firebase-service-account.json'),
+                path.join(process.cwd(), 'backend/src/config/firebase-service-account.json'),
+                path.join(__dirname, '../config/firebase-service-account.json')
+            ];
 
-        if (serviceAccount) {
-            let key = serviceAccount.private_key || serviceAccount.privateKey;
-            if (key) {
-                // Remove literal \n, quotes, and trim whitespace/newlines
-                key = key.replace(/\\n/g, '\n').replace(/"/g, '').trim();
-                
-                // If the key is one giant line, we must ensure it has proper newlines for the parser
-                if (!key.includes('\n')) {
-                    console.log('⚠️ Firebase key format fixed: Added missing newlines');
-                    key = key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
-                             .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+            for (const p of possiblePaths) {
+                const resolvedPath = path.resolve(p);
+                try {
+                    serviceAccount = require(resolvedPath);
+                    console.log(`✅ Loaded Firebase service account from file: ${resolvedPath}`);
+                    break;
+                } catch (e) {
+                    // Continue to next path
                 }
-                
-                if (serviceAccount.private_key) serviceAccount.private_key = key;
-                else if (serviceAccount.privateKey) serviceAccount.privateKey = key;
             }
+        }
+
+        if (!serviceAccount) {
+            throw new Error('Firebase credentials missing: Neither environment variables nor service-account.json found.');
+        }
+
+        // Standardize Private Key Format
+        let key = serviceAccount.private_key || serviceAccount.privateKey;
+        if (key) {
+            // 1. Convert literal \n to real newlines
+            key = key.replace(/\\n/g, '\n');
+            
+            // 2. Remove any surrounding quotes (sometimes added by dotenv or shells)
+            key = key.replace(/^["']|["']$/g, '');
+            
+            // 3. Trim whitespace
+            key = key.trim();
+
+            // 4. Robust header/footer check - ensure they are on their own lines
+            if (!key.includes('-----BEGIN PRIVATE KEY-----\n')) {
+                key = key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n');
+            }
+            if (!key.includes('\n-----END PRIVATE KEY-----')) {
+                key = key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+            }
+
+            // Assign back to both possible property names just in case
+            serviceAccount.private_key = key;
+            serviceAccount.privateKey = key;
         }
 
         admin.initializeApp({
@@ -81,5 +85,7 @@ const initializeFirebase = () => {
 module.exports = {
     admin,
     initializeFirebase,
-    getMessaging: () => isInitialized ? admin.messaging() : null
+    getMessaging: () => isInitialized ? admin.messaging() : null,
+    getFirestore: () => isInitialized ? admin.firestore() : null,
+    getAuth: () => isInitialized ? admin.auth() : null
 };

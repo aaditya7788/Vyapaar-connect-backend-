@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const providerController = require('./provider.controller');
-const { authMiddleware } = require('../../../middleware/auth.middleware');
+const { authMiddleware, optionalAuthMiddleware } = require('../../../middleware/auth.middleware');
 
 /**
  * @route   POST /api/provider/onboard
@@ -40,11 +40,17 @@ router.delete('/shops/:id', authMiddleware, providerController.deleteShop);
 /**
  * @route   GET /api/provider/shops/:id
  */
-router.get('/shops/:id', providerController.getShopById);
+router.get('/shops/:id', optionalAuthMiddleware, providerController.getShopById);
 
 /**
  * @route   GET /api/provider/dashboard/:id
  */
 router.get('/dashboard/:id', authMiddleware, providerController.getDashboard);
+
+/**
+ * Gallery Management — Granular Updates
+ */
+router.post('/shops/:id/gallery', authMiddleware, providerController.addGalleryImage);
+router.delete('/shops/:id/gallery', authMiddleware, providerController.removeGalleryImage);
 
 module.exports = router;

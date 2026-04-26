@@ -3,6 +3,12 @@ const router = express.Router();
 const categoryController = require('./category.controller');
 
 const { authMiddleware, requireRole } = require('../../../middleware/auth.middleware');
+const { upload } = require('../../../middleware/upload');
+
+const categoryUpload = upload.fields([
+    { name: 'icon', maxCount: 1 },
+    { name: 'mascotImage', maxCount: 1 }
+]);
 
 /**
  * @route   GET /api/category
@@ -23,14 +29,14 @@ router.get('/:id', categoryController.getCategory);
  * @desc    Create category
  * @access  Admin
  */
-router.post('/', authMiddleware, requireRole('admin'), categoryController.createCategory);
+router.post('/', authMiddleware, requireRole('admin'), categoryUpload, categoryController.createCategory);
 
 /**
  * @route   PUT /api/category/:id
  * @desc    Update category
  * @access  Admin
  */
-router.put('/:id', authMiddleware, requireRole('admin'), categoryController.updateCategory);
+router.put('/:id', authMiddleware, requireRole('admin'), categoryUpload, categoryController.updateCategory);
 
 /**
  * @route   DELETE /api/category/:id

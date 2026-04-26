@@ -30,6 +30,28 @@ const toggleCategoryVisibility = async (req, res) => {
   }
 };
 
+const toggleTrending = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, isTrending } = req.body;
+    const result = await adminService.updateTrending(type, id, isTrending);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const toggleSubcategoryVisibility = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isVisible } = req.body;
+    const result = await adminService.updateSubcategoryVisibility(id, isVisible);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 const listAds = async (req, res) => {
   try {
     const ads = await adminService.getAllAds();
@@ -86,14 +108,28 @@ const getServicesForAdmin = async (req, res) => {
   }
 };
 
+const freezeShop = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isFrozen } = req.body;
+    const shop = await adminService.setShopFreezeStatus(id, isFrozen);
+    res.status(200).json({ status: 'success', data: shop });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 module.exports = {
   getHomeCategories,
   updateCategoriesOrder,
   toggleCategoryVisibility,
+  toggleTrending,
+  toggleSubcategoryVisibility,
   listAds,
   createAd,
   updateAd,
   deleteAd,
   getShopsForAdmin,
-  getServicesForAdmin
+  getServicesForAdmin,
+  freezeShop
 };

@@ -1,4 +1,5 @@
 const prisma = require('../../../db');
+const { deleteFromS3 } = require('../../../utils/s3Service');
 
 /**
  * Fetch all categories with their subcategories
@@ -64,19 +65,38 @@ const createCategory = async (data) => {
  * Update an existing category
  */
 const updateCategory = async (id, data) => {
-    return prisma.category.update({
+    const existing = await prisma.category.findUnique({ where: { id } });
+    const updated = await prisma.category.update({
         where: { id },
         data
     });
+
+    // Handle Image cleanup on S3
+    if (existing) {
+        if (data.icon && existing.icon && data.icon !== existing.icon) {
+            deleteFromS3(existing.icon);
+        }
+        if (data.mascotImage && existing.mascotImage && data.mascotImage !== existing.mascotImage) {
+            deleteFromS3(existing.mascotImage);
+        }
+    }
+    return updated;
 };
 
 /**
  * Delete a category
  */
 const deleteCategory = async (id) => {
-    return prisma.category.delete({
+    const existing = await prisma.category.findUnique({ where: { id } });
+    const deleted = await prisma.category.delete({
         where: { id }
     });
+
+    if (existing) {
+        if (existing.icon) deleteFromS3(existing.icon);
+        if (existing.mascotImage) deleteFromS3(existing.mascotImage);
+    }
+    return deleted;
 };
 
 /**
@@ -90,19 +110,31 @@ const createSubcategory = async (data) => {
  * Update an existing subcategory
  */
 const updateSubcategory = async (id, data) => {
-    return prisma.subcategory.update({
+    const existing = await prisma.subcategory.findUnique({ where: { id } });
+    const updated = await prisma.subcategory.update({
         where: { id },
         data
     });
+
+    if (existing && data.image && existing.image && data.image !== existing.image) {
+        deleteFile(existing.image);
+    }
+    return updated;
 };
 
 /**
  * Delete a subcategory
  */
 const deleteSubcategory = async (id) => {
-    return prisma.subcategory.delete({
+    const existing = await prisma.subcategory.findUnique({ where: { id } });
+    const deleted = await prisma.subcategory.delete({
         where: { id }
     });
+
+    if (existing && existing.image) {
+        deleteFile(existing.image);
+    }
+    return deleted;
 };
 
 /**

@@ -1,14 +1,29 @@
 const { getMessaging } = require('../../../utils/firebase');
 const prisma = require('../../../db');
 const { Expo } = require('expo-server-sdk');
+const env = require('../../../config/env');
 
 // Initialize Expo SDK
 const expo = new Expo();
 
 /**
+ * Helper to ensure URLs are absolute for push notification clients (FCM/Expo)
+ */
+const _normalizeUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+
+    // Fallback to environment-defined BASE_URL
+    const baseUrl = env.BASE_URL;
+    return `${baseUrl.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+};
+
+/**
  * Helper to dispatch notifications to multiple services (Firebase and Expo)
  */
-const _dispatchToServices = async (registrationTokens, { title, body }, data = {}) => {
+const _dispatchToServices = async (registrationTokens, { title, body }, data = {}, channelId = 'booking-alerts') => {
+    const bannerUrl = _normalizeUrl(data.imageUrl);
+    const sponsoredUrl = _normalizeUrl(data.sponsoredImageUrl);
     let successCount = 0;
     let failureCount = 0;
 
@@ -34,14 +49,33 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
                 for (let i = 0; i < fcmTokens.length; i += CHUNK_SIZE) {
                     const chunk = fcmTokens.slice(i, i + CHUNK_SIZE);
                     const message = {
-                        notification: { 
-                            title, 
+                        notification: {
+                            title,
                             body,
-                            ...(data.imageUrl ? { image: data.imageUrl } : {})
+                            image: bannerUrl // Standard FCM image field
+                        },
+                        android: {
+                            notification: {
+                                channelId: channelId,
+                                priority: 'max',
+                                sound: 'default',
+                                defaultSound: true,
+                                notificationPriority: 'priority_max',
+                                imageUrl: bannerUrl
+                            }
+                        },
+                        apns: {
+                            payload: {
+                                aps: {
+                                    'mutable-content': 1 // Required for iOS rich media notifications
+                                }
+                            }
                         },
                         data: {
                             ...data,
-                            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                            imageUrl: bannerUrl || data.imageUrl,
+                            sponsoredImageUrl: sponsoredUrl || data.sponsoredImageUrl,
+                            channelId: channelId,
                         },
                         tokens: chunk,
                     };
@@ -86,19 +120,28 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
                 sound: 'default',
                 title,
                 body,
-                data,
+                data: {
+                    ...data,
+                    image: bannerUrl || data.imageUrl,
+                    imageUrl: bannerUrl || data.imageUrl,
+                    sponsoredImageUrl: sponsoredUrl || data.sponsoredImageUrl,
+                },
+                channelId: channelId,
+                categoryId: data.categoryId || undefined,
+                priority: 'high',
             }));
 
-            // Expo recommends batching 100 at a time
             const chunks = expo.chunkPushNotifications(messages);
             for (const chunk of chunks) {
                 const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-                // Note: Tickets only confirm receipt by Expo, not delivery.
-                // We increment successCount for now.
-                successCount += ticketChunk.length;
-                
-                // Real delivery status requires checking receipts later, 
-                // but for campaigns, we keep it simple.
+                for (let ticket of ticketChunk) {
+                    if (ticket.status === 'ok') {
+                        successCount++;
+                    } else {
+                        console.error('[Push] Expo Ticket Error:', ticket.message);
+                        failureCount++;
+                    }
+                }
             }
         } catch (error) {
             console.error('[Push] Expo Dispatch Error:', error.message);
@@ -110,11 +153,98 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
 };
 
 /**
- * Send a push notification to a specific user
+ * NEW: Mission Control - Direct Firebase Dispatch for Campaigns
+ * Filters out Expo tokens and uses raw Multicast for reliability.
  */
-const sendPushToUser = async (userId, { title, body }, data = {}) => {
+const _dispatchToFirebaseOnly = async (registrationTokens, { title, body }, data = {}) => {
+    const bannerUrl = _normalizeUrl(data.imageUrl);
+    let successCount = 0;
+    let failureCount = 0;
+
+    // Filter to ENSURE only Native FCM tokens are used
+    const fcmTokens = (registrationTokens || []).filter(t => !t.startsWith('ExponentPushToken'));
+
+    if (fcmTokens.length > 0) {
+        try {
+            const messaging = getMessaging();
+            if (messaging) {
+                const CHUNK_SIZE = 500;
+                for (let i = 0; i < fcmTokens.length; i += CHUNK_SIZE) {
+                    const chunk = fcmTokens.slice(i, i + CHUNK_SIZE);
+                    
+                    // Match the EXACT payload from Mission Control Script
+                    const message = {
+                        notification: { 
+                            title, 
+                            body, 
+                            image: bannerUrl 
+                        },
+                        data: {
+                            ...data,
+                            title,
+                            body,
+                            image: bannerUrl || data.imageUrl,
+                            channelId: 'booking-alerts',
+                        },
+                        android: {
+                            priority: 'high',
+                            notification: {
+                                channelId: 'booking-alerts',
+                                priority: 'max',
+                                icon: 'notifications_icon',
+                                color: '#4F8F6A',
+                                sound: 'default'
+                            }
+                        },
+                        tokens: chunk,
+                    };
+
+                    const response = await messaging.sendEachForMulticast(message);
+                    successCount += response.successCount;
+                    failureCount += response.failureCount;
+
+                    // Cleanup invalid tokens found in mission control
+                    if (response.failureCount > 0) {
+                        const invalidTokens = [];
+                        response.responses.forEach((resp, idx) => {
+                            if (!resp.success) {
+                                const errorCode = resp.error?.code;
+                                if (errorCode === 'messaging/registration-token-not-registered' || 
+                                    errorCode === 'messaging/invalid-registration-token') {
+                                    invalidTokens.push(chunk[idx]);
+                                }
+                            }
+                        });
+                        if (invalidTokens.length > 0) {
+                            await prisma.pushToken.deleteMany({ where: { token: { in: invalidTokens } } });
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Push-MissionControl] Firebase Dispatch Failed:', error.message);
+        }
+    }
+    return { successCount, failureCount };
+};
+
+/**
+ * Send a push notification to a specific user and save to history
+ */
+const sendPushToUser = async (userId, { title, body }, data = {}, channelId = 'booking-alerts') => {
     try {
-        // 1. Fetch all active push tokens for this user
+        // 1. Save to Notification History in DB
+        const dbNotification = await prisma.notification.create({
+            data: {
+                userId,
+                title,
+                body,
+                type: data.type || 'GENERAL',
+                data: { ...data, targetContext: data.targetContext || 'customer' }
+            }
+        });
+
+        // 2. Fetch all active push tokens for this user
         const tokens = await prisma.pushToken.findMany({
             where: { userId },
             select: { token: true }
@@ -128,8 +258,13 @@ const sendPushToUser = async (userId, { title, body }, data = {}) => {
         }
 
         const registrationTokens = tokens.map(t => t.token);
-        const result = await _dispatchToServices(registrationTokens, { title, body }, data);
-        
+        // Tag the push payload with the targetContext and ID
+        const result = await _dispatchToServices(registrationTokens, { title, body }, {
+            ...data,
+            notificationId: dbNotification.id,
+            targetContext: data.targetContext || 'customer'
+        }, channelId);
+
         console.log(`[Push] Successfully sent to ${result.successCount} devices for user ${userId}`);
         return result;
     } catch (error) {
@@ -142,24 +277,45 @@ const sendPushToUser = async (userId, { title, body }, data = {}) => {
  */
 const sendPushToCategory = async (category, { title, body }, data = {}) => {
     try {
-        // 1. Build role filter (Handle lowercase mismatch from DB)
-        let where = {};
-        if (category === 'CUSTOMER') where = { user: { roles: { has: 'customer' } } };
-        else if (category === 'PROVIDER') where = { user: { roles: { has: 'provider' } } };
+        // 1. Fetch matching users to save history for each
+        const targetRole = category?.toUpperCase(); // 'CUSTOMER', 'PROVIDER', or 'ALL'
+        const whereClause = targetRole === 'ALL' ? {} : { roles: { has: targetRole.toLowerCase() } };
 
-        // 2. Fetch all tokens for this category
+        const users = await prisma.user.findMany({
+            where: whereClause,
+            select: { id: true }
+        });
+
+        if (users.length === 0) {
+            console.log(`[Push Broadcast] No users found with role: ${targetRole}`);
+            return { successCount: 0, failureCount: 0 };
+        }
+
+        // 2. Save to Notification History for ALL matching users in bulk
+        await prisma.notification.createMany({
+            data: users.map(user => ({
+                userId: user.id,
+                title,
+                body,
+                type: data.type || 'CAMPAIGN',
+                data: data
+            }))
+        });
+
+        // 3. Fetch all device tokens for these users
         const tokens = await prisma.pushToken.findMany({
-            where,
+            where: targetRole === 'ALL' ? {} : { user: { roles: { has: targetRole.toLowerCase() } } },
             select: { token: true }
         });
 
         if (tokens.length === 0) {
-            console.log(`[Push Broadcast] No tokens found for category ${category}`);
-            return { successCount: 0, failureCount: 0 };
+            console.log(`[Push Broadcast] No device tokens found for category ${category}`);
+            return { successCount: 1, failureCount: 0, note: 'Saved to history, but no active devices' };
         }
 
         const registrationTokens = tokens.map(t => t.token);
-        const result = await _dispatchToServices(registrationTokens, { title, body }, data);
+        // 🔥 Use dedicated Firebase-only path for Campaigns
+        const result = await _dispatchToFirebaseOnly(registrationTokens, { title, body }, data);
 
         console.log(`[Push Broadcast] Sent to ${result.successCount} devices in category ${category}`);
         return result;
@@ -170,5 +326,18 @@ const sendPushToCategory = async (category, { title, body }, data = {}) => {
 
 module.exports = {
     sendPushToUser,
-    sendPushToCategory
+    sendPushToCategory,
+    sendChatPush: async (userId, senderName, content, data) => {
+        return await sendPushToUser(userId, {
+            title: `💬 ${senderName}`,
+            body: content.length > 100 ? content.substring(0, 100) + '...' : content
+        }, { ...data, profileKey: 'CHAT_MESSAGE', type: 'CHAT_UI', categoryId: 'chat_messages' }, 'chat-messages');
+    },
+    sendCallPush: async (userId, senderName, data) => {
+        return await sendPushToUser(userId, {
+            title: `📞 Incoming Call`,
+            body: `${senderName} is calling...`
+        }, { ...data, profileKey: 'INC_CALL', type: 'CALL_UI' });
+    },
+    normalizeUrl: _normalizeUrl
 };

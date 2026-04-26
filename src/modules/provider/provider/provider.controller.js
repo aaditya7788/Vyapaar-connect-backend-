@@ -1,8 +1,12 @@
 const providerService = require('./provider.service');
+const { resolveAvatarUrl } = require('../../../utils/user.utils');
 
 const onboard = async (req, res) => {
   try {
     const result = await providerService.onboardProvider(req.user.id, req.body);
+    if (result.user) {
+      result.user.avatar = resolveAvatarUrl(result.user, req);
+    }
     res.status(200).json({ status: 'success', ...result });
   } catch (err) {
     res.status(err.status || 500).json({ status: 'error', message: err.message });
@@ -61,7 +65,7 @@ const deleteShop = async (req, res) => {
 const getShopById = async (req, res) => {
   try {
     const { id } = req.params;
-    const shop = await providerService.getShopById(id);
+    const shop = await providerService.getShopById(id, req.user?.id);
     res.status(200).json({ status: 'success', data: shop });
   } catch (err) {
     res.status(err.status || 500).json({ status: 'error', message: err.message });
@@ -78,6 +82,28 @@ const getDashboard = async (req, res) => {
   }
 };
 
+const addGalleryImage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { url } = req.body;
+    const shop = await providerService.addGalleryImage(req.user.id, id, url);
+    res.status(200).json({ status: 'success', data: shop });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const removeGalleryImage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { url } = req.body;
+    const shop = await providerService.removeGalleryImage(req.user.id, id, url);
+    res.status(200).json({ status: 'success', data: shop });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 module.exports = {
   onboard,
   addShop,
@@ -87,4 +113,6 @@ module.exports = {
   deleteShop,
   getShopById,
   getDashboard,
+  addGalleryImage,
+  removeGalleryImage,
 };

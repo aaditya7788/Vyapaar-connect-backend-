@@ -1,22 +1,5 @@
 const prisma = require('../../../db');
-const fs = require('fs');
-const path = require('path');
-
-/**
- * Helper to delete physical file
- */
-const deletePhysicalFile = (imageUrl) => {
-    if (!imageUrl) return;
-    try {
-        const fileName = imageUrl.split('/').pop();
-        const filePath = path.join(__dirname, '../../../../../uploads/ads', fileName);
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-        }
-    } catch (err) {
-        console.error('File deletion failed:', err);
-    }
-};
+const { deleteFile } = require('../../../utils/file.utils');
 
 /**
  * Categories - Admin List
@@ -52,6 +35,33 @@ const updateVisibility = async (id, isVisible) => {
 };
 
 /**
+ * Toggle Trending status
+ */
+const updateTrending = async (type, id, isTrending) => {
+    if (type === 'category') {
+        return await prisma.category.update({
+            where: { id },
+            data: { isTrending }
+        });
+    } else {
+        return await prisma.subcategory.update({
+            where: { id },
+            data: { isTrending }
+        });
+    }
+};
+
+/**
+ * Toggle Subcategory Visibility
+ */
+const updateSubcategoryVisibility = async (id, isVisible) => {
+    return await prisma.subcategory.update({
+        where: { id },
+        data: { isVisible }
+    });
+};
+
+/**
  * Advertisements - Admin Operations
  */
 const getAllAds = async () => {
@@ -75,7 +85,7 @@ const createAdvertisement = async (adData) => {
 const updateAdvertisement = async (id, adData) => {
     const oldAd = await prisma.advertisement.findUnique({ where: { id } });
     if (adData.image && oldAd.image && adData.image !== oldAd.image) {
-        deletePhysicalFile(oldAd.image);
+        deleteFile(oldAd.image);
     }
 
     const { id: _, createdAt, updatedAt, ...validData } = adData;
@@ -92,7 +102,7 @@ const updateAdvertisement = async (id, adData) => {
 const removeAd = async (id) => {
     const ad = await prisma.advertisement.findUnique({ where: { id } });
     if (ad?.image) {
-        deletePhysicalFile(ad.image);
+        deleteFile(ad.image);
     }
     return await prisma.advertisement.delete({
         where: { id }
@@ -117,14 +127,24 @@ const listServices = async () => {
     });
 };
 
+const setShopFreezeStatus = async (id, isFrozen) => {
+    return await prisma.shop.update({
+        where: { id },
+        data: { isFrozen }
+    });
+};
+
 module.exports = {
   listCategoriesIncludingHidden,
   reorderCategories,
   updateVisibility,
+  updateTrending,
+  updateSubcategoryVisibility,
   getAllAds,
   createAdvertisement,
   updateAdvertisement,
   removeAd,
   listShops,
-  listServices
+  listServices,
+  setShopFreezeStatus
 };

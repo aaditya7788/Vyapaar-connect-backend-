@@ -38,4 +38,11 @@ router.get('/:id', authMiddleware, bookingController.detail);
  */
 router.patch('/:id/status', authMiddleware, bookingController.updateStatus);
 
+/**
+ * @route   POST /api/bookings/:id/retry
+ * @desc    Retry an expired booking
+ * @access  Private
+ */
+router.post('/:id/retry', authMiddleware, bookingController.retryBooking);
+
 module.exports = router;

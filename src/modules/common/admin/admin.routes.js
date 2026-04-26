@@ -15,11 +15,19 @@ router.get('/home/categories', authMiddleware, adminMiddleware, adminController.
  */
 router.patch('/home/categories/order', authMiddleware, adminMiddleware, adminController.updateCategoriesOrder);
 
-/**
- * @route   PATCH /api/admin/home/categories/:id/visibility
- * @desc    Toggle category visibility on home page
- */
 router.patch('/home/categories/:id/visibility', authMiddleware, adminMiddleware, adminController.toggleCategoryVisibility);
+
+/**
+ * @route   PATCH /api/admin/home/trending/:id
+ * @desc    Toggle trending status for category or subcategory
+ */
+router.patch('/home/trending/:id', authMiddleware, adminMiddleware, adminController.toggleTrending);
+
+/**
+ * @route   PATCH /api/admin/home/subcategories/:id/visibility
+ * @desc    Toggle subcategory visibility on home page
+ */
+router.patch('/home/subcategories/:id/visibility', authMiddleware, adminMiddleware, adminController.toggleSubcategoryVisibility);
 
 /**
  * @route   GET /api/admin/shops

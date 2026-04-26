@@ -1,5 +1,6 @@
 const prisma = require('../../../db');
 const { resolveAvatarUrl } = require('../../../utils/user.utils');
+const { deleteFile } = require('../../../utils/file.utils');
 
 /**
  * Get current user profile
@@ -49,6 +50,8 @@ const updateProfile = async (req, res) => {
   }
 };
 
+const { uploadToS3, deleteFromS3 } = require('../../../utils/s3Service');
+
 /**
  * Update Profile Avatar
  */
@@ -58,26 +61,48 @@ const updateAvatar = async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'No image uploaded' });
     }
 
-    // Store relative path in DB
-    const relativePath = `/uploads/avatars/${req.file.filename}`;
+    // Get old user to delete previous file
+    const oldUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { avatar: true }
+    });
+
+    // Upload to S3
+    const folder = req.uploadFolder || 'customer/avatars';
+    const s3Url = await uploadToS3(
+      req.file.buffer, 
+      req.file.originalname, 
+      folder, 
+      req.file.mimetype
+    );
 
     const user = await prisma.user.update({
       where: { id: req.user.id },
-      data: { avatar: relativePath }
+      data: { avatar: s3Url }
     });
 
-    const fullAvatarUrl = resolveAvatarUrl(user, req);
+    // If update success, delete old file from S3 (if it was an S3 URL)
+    if (oldUser && oldUser.avatar && oldUser.avatar !== s3Url) {
+        if (oldUser.avatar.startsWith('http')) {
+          await deleteFromS3(oldUser.avatar);
+        } else {
+          // Fallback for older local files during migration
+          deleteFile(oldUser.avatar);
+        }
+    }
 
     res.status(200).json({ 
       status: 'success', 
       message: 'Avatar updated', 
-      avatar: fullAvatarUrl,
-      user: { ...user, avatar: fullAvatarUrl }
+      avatar: s3Url,
+      user: { ...user, avatar: s3Url }
     });
   } catch (err) {
+    console.error('[Avatar Update Error]:', err);
     res.status(500).json({ status: 'error', message: err.message });
   }
-};/**
+};
+/**
  * Register/Update Push Token
  */
 const registerPushToken = async (req, res) => {
@@ -88,21 +113,109 @@ const registerPushToken = async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Token is required' });
     }
 
-    // Upsert the token for this user
+    // 1. Clean up any stale token specifically associated with this session
+    // This avoids "Replacing" conflicts because sessionId in PushToken is @unique
+    if (req.sessionId) {
+      await prisma.pushToken.deleteMany({
+        where: { 
+          sessionId: req.sessionId,
+          token: { not: token } 
+        }
+      });
+    }
+
+    // 2. Upsert the token for this user + session
     const pushToken = await prisma.pushToken.upsert({
       where: { token },
       update: { 
         userId: req.user.id, 
+        sessionId: req.sessionId || null,
         platform: platform || 'unknown' 
       },
       create: { 
         token, 
         userId: req.user.id, 
+        sessionId: req.sessionId || null,
         platform: platform || 'unknown' 
       }
     });
 
+    console.log(`✅ [PushSync] User ${req.user.id} registered Native FCM Token: ${token.substring(0, 10)}... (${platform || 'unknown'})`);
+
     res.status(200).json({ status: 'success', message: 'Push token registered', data: pushToken });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+/**
+ * Get notification history for current user
+ */
+const getNotifications = async (req, res) => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+
+    // Normalize image URLs in data payload
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const normalizedHistory = notifications.map(notif => {
+      if (notif.data) {
+        if (notif.data.imageUrl && !notif.data.imageUrl.startsWith('http')) {
+          notif.data.imageUrl = `${baseUrl.replace(/\/$/, '')}/${notif.data.imageUrl.replace(/^\//, '')}`;
+        }
+        if (notif.data.sponsoredImageUrl && !notif.data.sponsoredImageUrl.startsWith('http')) {
+          notif.data.sponsoredImageUrl = `${baseUrl.replace(/\/$/, '')}/${notif.data.sponsoredImageUrl.replace(/^\//, '')}`;
+        }
+      }
+      return notif;
+    });
+
+    res.status(200).json({ status: 'success', data: normalizedHistory });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+/**
+ * Mark all notifications as read for current user
+ */
+const markNotificationsRead = async (req, res) => {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.user.id, isRead: false },
+      data: { isRead: true }
+    });
+
+    res.status(200).json({ status: 'success', message: 'Notifications marked as read' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+/**
+ * Delete a specific notification
+ */
+const deleteNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Ensure notification belongs to user
+    const notification = await prisma.notification.findUnique({
+      where: { id }
+    });
+
+    if (!notification || notification.userId !== req.user.id) {
+      return res.status(404).json({ status: 'fail', message: 'Notification not found' });
+    }
+
+    await prisma.notification.delete({
+      where: { id }
+    });
+
+    res.status(200).json({ status: 'success', message: 'Notification deleted' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
@@ -112,5 +225,8 @@ module.exports = {
   getProfile,
   updateProfile,
   updateAvatar,
-  registerPushToken
+  registerPushToken,
+  getNotifications,
+  markNotificationsRead,
+  deleteNotification
 };

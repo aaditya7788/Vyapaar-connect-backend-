@@ -13,5 +13,8 @@ router.use(adminMiddleware);
  * @access  Admin Only
  */
 router.get('/search', userController.searchUsers);
+router.get('/list', userController.listUsers);
+router.get('/:id/activity', userController.getUserActivity);
+router.patch('/:id/status', userController.updateUserStatus);
 
 module.exports = router;

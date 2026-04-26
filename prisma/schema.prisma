@@ -9,45 +9,49 @@ datasource db {
 }
 
 model User {
-  id                String           @id @default(uuid())
-  phone             String           @unique
-  phoneVerified     Boolean          @default(false)
-  fullName          String?
-  email             String?          @unique
-  emailVerified     Boolean          @default(false)
-  avatar            String?          @default("/uploads/avatars/default.png")
-  customerId        String           @unique
-  providerId        String?          @unique
-  roles             String[]         @default(["customer"])
-  isProfileComplete Boolean          @default(false)
-  status            String           @default("active")
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  bookings          Booking[]
-  addresses         UserAddress[]
-  providerProfile   ProviderProfile?
-  refreshTokens     RefreshToken[]
-  reviews           Review[]
-
-  // Wallet & Credit System
-  credits           UserCredits?
-  creditTransactions CreditTransaction[]
+  id                 String              @id @default(uuid())
+  phone              String              @unique
+  phoneVerified      Boolean             @default(false)
+  fullName           String?
+  email              String?             @unique
+  emailVerified      Boolean             @default(false)
+  avatar             String?             @default("/uploads/avatars/default.png")
+  customerId         String              @unique
+  providerId         String?             @unique
+  roles              String[]            @default(["customer"])
+  isProfileComplete  Boolean             @default(false)
+  status             String              @default("active")
+  isOnline           Boolean             @default(false)
+  lastSeen           DateTime?
+  blockReason        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  bookings           Booking[]
   creditOrders       CreditOrder[]
-
-  // Push Notifications
-  pushTokens        PushToken[]
+  creditTransactions CreditTransaction[]
+  notifications      Notification[]
+  providerProfile    ProviderProfile?
+  pushTokens         PushToken[]
+  refreshTokens      RefreshToken[]
+  reviews            Review[]
+  addresses          UserAddress[]
+  credits            UserCredits?
+  recommendations    Recommendation[]
 }
 
 model PushToken {
-  id        String   @id @default(uuid())
+  id        String        @id @default(uuid())
   userId    String
-  token     String   @unique
-  platform  String?  // ios, android, web
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String        @unique
+  platform  String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  sessionId String?       @unique
+  session   RefreshToken? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([sessionId])
 }
 
 model UserCredits {
@@ -61,20 +65,16 @@ model UserCredits {
 model CreditTransaction {
   id          String   @id @default(uuid())
   userId      String
-  amount      Int      // Positive for credit (+), negative for debit (-)
-  type        String   // e.g., "PURCHASE", "USED", "REFUND", "BONUS"
-  description String?  // Optional context (e.g., "Payment for Booking #BK-9821")
-  
-  // Linkages
+  amount      Int
+  type        String
+  description String?
   bookingId   String?
   orderId     String?  @unique
-  status      String   @default("SUCCESS") // SUCCESS, FAILED
-  
-  metadata    Json?    // For external IDs or any extra data
+  status      String   @default("SUCCESS")
+  metadata    Json?
   createdAt   DateTime @default(now())
-  
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   booking     Booking? @relation(fields: [bookingId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([bookingId])
@@ -83,14 +83,14 @@ model CreditTransaction {
 model CreditOrder {
   id              String   @id @default(uuid())
   userId          String
-  planId          String   // References selected plan (50, 100, 250 credits, etc.)
+  planId          String
   currency        String   @default("INR")
-  amount          Float    // Monetary amount (e.g., 199.00)
-  status          String   @default("created") // "created", "paid", "failed"
+  amount          Float
+  status          String   @default("created")
   razorpayOrderId String?  @unique
   paymentId       String?  @unique
   signature       String?
-  metadata        Json?    // Optional extra data (coupons, discounts, etc.)
+  metadata        Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -110,14 +110,18 @@ model ProviderProfile {
 }
 
 model Category {
-  id            String        @id @default(uuid())
-  name          String        @unique
-  icon          String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  isVisible     Boolean       @default(true)
-  order         Int           @default(0)
-  subcategories Subcategory[]
+  id               String        @id @default(uuid())
+  name             String        @unique
+  icon             String?
+  supportsQuantity Boolean       @default(false)
+  mascotImage      String?
+  startOtpRequired     Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  isVisible        Boolean       @default(true)
+  isTrending       Boolean       @default(false)
+  order            Int           @default(0)
+  subcategories    Subcategory[]
 }
 
 model Subcategory {
@@ -128,6 +132,7 @@ model Subcategory {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   isVisible  Boolean  @default(true)
+  isTrending Boolean  @default(false)
   order      Int      @default(0)
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
@@ -137,11 +142,15 @@ model Subcategory {
 model Shop {
   id                String          @id @default(uuid())
   name              String
+  houseNo           String?
+  area              String?
   address           String
   experience        String?
   profileImage      String?
   backgroundImages  String[]        @default([])
+  gallery           String[]        @default([])
   status            String          @default("PENDING")
+  isFrozen          Boolean         @default(false)
   providerProfileId String
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
@@ -164,116 +173,217 @@ model Shop {
   communityId       String?
   averageRating     Float           @default(0)
   reviewCount       Int             @default(0)
-  services          Service[]
+  jobsCompleted     Int             @default(0)
+  views             Int             @default(0)
   bookings          Booking[]
   reviews           Review[]
+  services          Service[]
+  slotConfigs       ShopSlotConfig[]
   community         Community?      @relation(fields: [communityId], references: [id])
   providerProfile   ProviderProfile @relation(fields: [providerProfileId], references: [id], onDelete: Cascade)
+  recommendations   Recommendation[]
+}
+
+model ShopSlotConfig {
+  id           String    @id @default(uuid())
+  shopId       String
+  dayOfWeek    Int?      // 0-6 (0=Sun, 1=Mon, etc.) - null if it's a specific date override
+  date         DateTime? // Specific date for override (null for weekly rule)
+  startTime    String    // "HH:mm" (e.g., "09:00")
+  endTime      String    // "HH:mm" (e.g., "18:00")
+  slotDuration Int       @default(60) // minutes
+  maxBookings  Int       @default(1)  // concurrency per slot
+  isBreak      Boolean   @default(false)
+  isActive     Boolean   @default(true) // To enable/disable manually
+  label        String?   // e.g., "Lunch", "Personal Time"
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, dayOfWeek])
+  @@index([shopId, date])
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String     @id @default(uuid())
+  userId     String
+  token      String     @unique
+  expiresAt  DateTime
+  createdAt  DateTime   @default(now())
+  deviceName String?
+  platform   String?
+  lastActive DateTime   @default(now())
+  ipAddress  String?
+  pushToken  PushToken?
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Service {
-  id            String    @id @default(uuid())
-  name          String
-  description   String?
-  price         Float
-  duration      String
-  category      String?
-  subcategories String[]  @default([])
-  inclusions    String[]  @default([])
-  isActive      Boolean   @default(true)
-  image         String?
-  shopId        String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  isFeatured    Boolean   @default(false)
-  averageRating Float     @default(0)
-  reviewCount   Int       @default(0)
-  bookings      Booking[]
+  id             String          @id @default(uuid())
+  name           String
+  description    String?
+  price          Float
+  duration       String
+  category       String?
+  subcategories  String[]        @default([])
+  inclusions     String[]        @default([])
+  isActive       Boolean         @default(true)
+  image          String?
+  shopId         String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  isFeatured     Boolean         @default(false)
+  averageRating  Float           @default(0)
+  reviewCount    Int             @default(0)
+  shop           Shop?           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   serviceRatings ServiceRating[]
-  shop          Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  bookings       Booking[]       @relation("BookingToService")
+  bookingItems   BookingItem[]
 }
 
 model Advertisement {
-  id        String    @id @default(uuid())
-  title     String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  
-  type      String    @default("IMAGE") // IMAGE or TEXT
-  image     String?   // URL for IMAGE type
-  
-  // High-fidelity Text Layout fields
-  headline  String?
-  subText   String?
-  badge     String?
-  btnLabel  String?   @default("Book Now")
-  bgFrom    String?   @default("#FFFFFF")
-  accent    String?   @default("#000000")
-  sharpCorners Boolean @default(false)
-  showTitle    Boolean @default(true)
-  titleColor   String? @default("#FFFFFF")
-  
-  // Deep-Link Engine
-  link        String?   // Raw link or generated deep link
-  targetId    String?   // ID of category or shop
-  targetType  String?   // "CATEGORY" or "SHOP"
-
-  endDate   DateTime?
-  order     Int       @default(0)
-  position  String    @default("HOME_TOP")
-  startDate DateTime?
+  id           String    @id @default(uuid())
+  title        String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  type         String    @default("IMAGE")
+  image        String?
+  headline     String?
+  subText      String?
+  badge        String?
+  btnLabel     String?   @default("Book Now")
+  bgFrom       String?   @default("#FFFFFF")
+  accent       String?   @default("#000000")
+  sharpCorners Boolean   @default(false)
+  showTitle    Boolean   @default(true)
+  titleColor   String?   @default("#FFFFFF")
+  link         String?
+  targetId     String?
+  targetType   String?
+  endDate      DateTime?
+  order        Int       @default(0)
+  position     String    @default("HOME_TOP")
+  startDate    DateTime?
 }
 
 model Booking {
-  id              String        @id @default(uuid())
-  displayId       String?       @unique // Human-readable ID (e.g. BK-7A1B2C)
-  userId          String
-  shopId          String
-  addressId       String
-  scheduledDate   DateTime
-  scheduledTime   String
-  status          BookingStatus @default(PENDING)
-  otp             String?       // Start Verification
-  completionOtp   String?       // End Verification
-  totalAmount     Float         @default(0)
-  creditFeePaid   Boolean       @default(false)
-  creditFeeAmount Int           @default(0)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
-  services        Service[]     // Many-to-Many relationship
-  user            User          @relation(fields: [userId], references: [id])
-  shop            Shop          @relation(fields: [shopId], references: [id])
-  address         UserAddress   @relation(fields: [addressId], references: [id])
+  id                 String              @id @default(uuid())
+  displayId          String?             @unique
+  userId             String
+  shopId             String
+  addressId          String?
+  addressData        Json?
+  scheduledDate      DateTime
+  scheduledTime      String
+  status             BookingStatus       @default(PENDING)
+  potentialProviders String[]            @default([])
+  currentProviderIndex Int               @default(0)
+  dispatchTimeoutAt  DateTime?
+  totalRetries       Int                 @default(0)
+  manualRetries      Int                 @default(0)
+  otp                String?
+  completionOtp      String?
+  totalAmount        Float               @default(0)
+  creditFeePaid      Boolean             @default(false)
+  creditFeeAmount    Int                 @default(0)
+  isCallUnlocked     Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  address            UserAddress?        @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  shop               Shop                @relation(fields: [shopId], references: [id])
+  user               User                @relation(fields: [userId], references: [id])
+  items              BookingItem[]
   creditTransactions CreditTransaction[]
-  review          Review?
+  review             Review?
+  services           Service[]           @relation("BookingToService")
+  chatRoom           ChatRoom?
+  calls              Call[]
+}
+
+model Call {
+  id          String   @id @default(uuid())
+  bookingId   String
+  callerId    String
+  receiverId  String
+  channelName String   @unique
+  status      String   @default("RINGING") // RINGING, ONGOING, COMPLETED, MISSED, REJECTED
+  startTime   DateTime @default(now())
+  endTime     DateTime?
+  duration    Int?     // seconds
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([callerId])
+  @@index([receiverId])
+}
+
+model SlotLock {
+  id            String   @id @default(uuid())
+  shopId        String
+  scheduledDate DateTime
+  scheduledTime String
+  expiresAt     DateTime
+  userId        String
+  createdAt     DateTime @default(now())
+
+  @@unique([shopId, scheduledDate, scheduledTime])
+  @@index([expiresAt])
+}
+
+model ChatRoom {
+  id        String    @id @default(uuid())
+  bookingId String    @unique
+  isLocked  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  booking   Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  messages  Message[]
+}
+
+model Message {
+  id                 String    @id @default(uuid())
+  roomId             String
+  senderId           String
+  content            String
+  type               String    @default("TEXT") // TEXT, SYSTEM, CUSTOM_SERVICE
+  status             String    @default("SENT") // SENT, DELIVERED, READ
+  deliveredAt        DateTime?
+  seenAt             DateTime?
+  customServiceData  Json?     // { name, price }
+  approvalStatus     String?   // PENDING, APPROVED, DECLINED
+  createdAt          DateTime  @default(now())
+  room               ChatRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model BookingItem {
+  id        String   @id @default(uuid())
+  bookingId String
+  serviceId String
+  quantity  Int      @default(1)
+  price     Float
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  service   Service  @relation(fields: [serviceId], references: [id])
 }
 
 model UserAddress {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  label     String   // e.g. Home, Office, Other
-  icon      String   @default("home")
-  address   String   // The full address string
+  label     String
+  name      String?   // Receiver/Contact Name
+  icon      String    @default("home")
+  address   String
   area      String?
   landmark  String?
   latitude  Float?
   longitude Float?
-  isDefault Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isDefault Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   bookings  Booking[]
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Community {
@@ -288,6 +398,134 @@ model Community {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   shops       Shop[]
+}
+
+model CreditPlan {
+  id           String    @id @default(uuid())
+  credits      Int
+  price        Float
+  label        String?
+  popular      Boolean   @default(false)
+  savings      String?
+  validityDays Int       @default(365)
+  isActive     Boolean   @default(true)
+  startDate    DateTime?
+  endDate      DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Coupon {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  type           String    @default("PERCENT")
+  discount       Float
+  minAmount      Float?    @default(0)
+  usageLimit     Int?
+  usedCount      Int       @default(0)
+  isActive       Boolean   @default(true)
+  isRedeemable   Boolean   @default(false)
+  creditsAwarded Int?
+  targetUserId   String?
+  startDate      DateTime? @default(now())
+  expiryDate     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model GlobalSettings {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  type        String   @default("number")
+  label       String?
+  description String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+model Review {
+  id             String          @id @default(uuid())
+  bookingId      String          @unique
+  userId         String
+  shopId         String
+  overallRating  Float
+  comment        String?
+  tags           String[]        @default([])
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  booking        Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceRatings ServiceRating[]
+
+  @@index([userId])
+  @@index([shopId])
+}
+
+model ServiceRating {
+  id        String   @id @default(uuid())
+  reviewId  String
+  serviceId String
+  rating    Float
+  comment   String?
+  createdAt DateTime @default(now())
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, serviceId])
+  @@index([serviceId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  type      String   @default("GENERAL")
+  isRead    Boolean  @default(false)
+  data      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Recommendation {
+  id        String   @id @default(uuid())
+  userId    String
+  shopId    String
+  status    String   // YES, NO, MAYBE
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, shopId])
+  @@index([shopId])
+}
+
+model SearchLog {
+  id          String   @id @default(uuid())
+  query       String
+  userId      String?
+  communityId String?
+  createdAt   DateTime @default(now())
+
+  @@index([query])
+  @@index([createdAt])
+}
+
+model SearchKeyword {
+  id        String   @id @default(uuid())
+  keyword   String   @unique
+  isPinned  Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([keyword])
 }
 
 enum Role {
@@ -305,82 +543,5 @@ enum BookingStatus {
   CANCELLED
   DECLINED
   EXPIRED
-}
-
-model CreditPlan {
-  id            String   @id @default(uuid())
-  credits       Int
-  price         Float
-  label         String?
-  popular       Boolean   @default(false)
-  savings       String?
-  validityDays  Int       @default(365)
-  isActive      Boolean   @default(true)
-  startDate     DateTime?
-  endDate       DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-}
-
-model Coupon {
-  id              String    @id @default(uuid())
-  code            String    @unique
-  type            String    @default("PERCENT") // PERCENT or FIXED
-  discount        Float
-  minAmount       Float?    @default(0)
-  usageLimit      Int?      // Total times this coupon can be used overall
-  usedCount       Int       @default(0)
-  isActive        Boolean   @default(true)
-  isRedeemable    Boolean   @default(false) // If true, applying adds credits directly
-  creditsAwarded  Int?      // Credits added if isRedeemable is true
-  targetUserId    String?   // If set, only this user can use it
-  startDate       DateTime? @default(now())
-  expiryDate      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-}
-
-model GlobalSettings {
-  id        String   @id @default(uuid())
-  key       String   @unique // e.g., "booking_accept_fee", "booking_complete_fee"
-  value     String   // Value stored as string, cast as needed
-  type      String   @default("number") // number, string, boolean, json
-  label     String?  // Human readable name for Admin panel
-  updatedAt DateTime @updatedAt
-}
-
-model Review {
-  id              String          @id @default(uuid())
-  bookingId       String          @unique
-  userId          String
-  shopId          String
-  overallRating   Float
-  comment         String?
-  tags            String[]        @default([])
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-
-  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  serviceRatings  ServiceRating[]
-
-  @@index([userId])
-  @@index([shopId])
-}
-
-model ServiceRating {
-  id          String   @id @default(uuid())
-  reviewId    String
-  serviceId   String
-  rating      Float
-  comment     String?
-  createdAt   DateTime @default(now())
-  
-  review      Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-
-  @@unique([reviewId, serviceId])
-  @@index([serviceId])
 }
 
