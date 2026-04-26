@@ -19,6 +19,9 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
 
           script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
             cd /var/www/onepointsolution
 
             git pull origin main
@@ -29,4 +32,4 @@ jobs:
 
             npx prisma migrate deploy
 
-            pm2 reload ecosystem.config.js --update-env
+            pm2 reload ecosystem.config.js --update-env || pm2 start ecosystem.config.js
