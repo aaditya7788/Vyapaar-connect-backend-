@@ -25,9 +25,14 @@ const uploadToS3 = async (fileContent, originalName, folder = 'common', mimetype
   const ext = path.extname(originalName).toLowerCase();
   const filename = `${uuidv4()}${ext}`;
   
-  // Clean folder path: remove 'uploads/' prefix if it exists
-  const cleanFolder = folder.replace(/^uploads[\/\\]?/, '').replace(/[\/\\]+$/, '');
-  const key = `${cleanFolder}/${filename}`.replace(/\/+/g, '/');
+  // Standardize folder path: ensure it starts with 'uploads/' and is lowercase
+  const cleanFolder = folder
+    .toLowerCase()
+    .replace(/^uploads[\/\\]?/, '') // Remove prefix if already present to avoid doubling
+    .replace(/[\/\\]+$/, '');       // Remove trailing slash
+    
+  const key = `uploads/${cleanFolder}/${filename}`.replace(/\/+/g, '/');
+
 
   try {
     const upload = new Upload({
