@@ -10,6 +10,7 @@
     "db:push": "npx prisma db push",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "node prisma/seed.js",
+    "db:check": "node scripts/check-db.js",
     "db:studio": "npx prisma studio"
   },
   "prisma": {

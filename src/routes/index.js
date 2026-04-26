@@ -22,8 +22,22 @@ const slotRoutes = require('../modules/provider/slots/slot.routes');
 const commonSettingsRoutes = require('../modules/common/settings/settings.routes');
 
 // Health Check
-router.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK', message: 'Vyapaar Connect API is healthy' });
+router.get('/health', async (req, res) => {
+    try {
+        const prisma = require('../db');
+        await prisma.$queryRaw`SELECT 1`;
+        res.status(200).json({ 
+            status: 'OK', 
+            message: 'Vyapaar Connect API is healthy',
+            database: 'CONNECTED'
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            status: 'ERROR', 
+            message: 'API is up but Database is unreachable',
+            error: error.message
+        });
+    }
 });
 
 // App Config (Public)

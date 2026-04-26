@@ -9,11 +9,11 @@ const resolveAvatarUrl = (user, req) => {
     return user.avatar;
   }
 
-  // If local upload path
+  // If path starts with /uploads, redirect to S3
   if (user.avatar.startsWith('/uploads')) {
-    const protocol = req.protocol;
-    const host = req.get('host');
-    return `${protocol}://${host}${user.avatar}`;
+    const env = require('../config/env');
+    const normalizedPath = user.avatar.startsWith('/') ? user.avatar.substring(1) : user.avatar;
+    return `${env.AWS.S3_BASE_URL}/${normalizedPath}`;
   }
 
   return user.avatar;

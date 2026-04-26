@@ -81,12 +81,12 @@ const updateAvatar = async (req, res) => {
       data: { avatar: s3Url }
     });
 
-    // If update success, delete old file from S3 (if it was an S3 URL)
+    // If update success, delete old file from S3 (if it was an S3 path)
     if (oldUser && oldUser.avatar && oldUser.avatar !== s3Url) {
-        if (oldUser.avatar.startsWith('http')) {
+        if (oldUser.avatar.startsWith('http') || oldUser.avatar.startsWith('/uploads')) {
           await deleteFromS3(oldUser.avatar);
         } else {
-          // Fallback for older local files during migration
+          // Fallback for purely local legacy files
           deleteFile(oldUser.avatar);
         }
     }
@@ -160,15 +160,22 @@ const getNotifications = async (req, res) => {
     });
 
     // Normalize image URLs in data payload
-    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const env = require('../../../config/env');
     const normalizedHistory = notifications.map(notif => {
       if (notif.data) {
-        if (notif.data.imageUrl && !notif.data.imageUrl.startsWith('http')) {
-          notif.data.imageUrl = `${baseUrl.replace(/\/$/, '')}/${notif.data.imageUrl.replace(/^\//, '')}`;
-        }
-        if (notif.data.sponsoredImageUrl && !notif.data.sponsoredImageUrl.startsWith('http')) {
-          notif.data.sponsoredImageUrl = `${baseUrl.replace(/\/$/, '')}/${notif.data.sponsoredImageUrl.replace(/^\//, '')}`;
-        }
+        // Handle images in notification metadata
+        const fixUrl = (url) => {
+          if (!url || url.startsWith('http')) return url;
+          if (url.startsWith('/uploads')) {
+            const clean = url.startsWith('/') ? url.substring(1) : url;
+            return `${env.AWS.S3_BASE_URL}/${clean}`;
+          }
+          const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+          return `${baseUrl.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+        };
+
+        if (notif.data.imageUrl) notif.data.imageUrl = fixUrl(notif.data.imageUrl);
+        if (notif.data.sponsoredImageUrl) notif.data.sponsoredImageUrl = fixUrl(notif.data.sponsoredImageUrl);
       }
       return notif;
     });

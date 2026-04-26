@@ -47,9 +47,10 @@ const uploadToS3 = async (fileContent, originalName, folder = 'common', mimetype
 
     await upload.done();
 
-    // Generate the public URL
-    // Format: https://bucket-name.s3.region.amazonaws.com/key
-    return `${env.AWS.S3_BASE_URL}/${key}`;
+    // Return the relative path instead of full URL
+    // This allows the frontend/resolver to handle the base URL dynamically
+    const relativePath = `/${key}`.replace(/\/+/g, '/');
+    return relativePath;
   } catch (error) {
     console.error('[S3] Upload Failed:', error.message);
     throw new Error('Failed to upload image to cloud storage');
@@ -61,14 +62,23 @@ const uploadToS3 = async (fileContent, originalName, folder = 'common', mimetype
  * @param {string} fileUrl - The full public URL of the file
  */
 const deleteFromS3 = async (fileUrl) => {
-  if (!fileUrl || !fileUrl.includes(BUCKET_NAME)) return;
+  if (!fileUrl) return;
 
   try {
-    // Extract key from URL
-    const urlParts = fileUrl.split(`${env.AWS.S3_BASE_URL}/`);
-    if (urlParts.length < 2) return;
-    
-    const key = urlParts[1];
+    let key = '';
+
+    if (fileUrl.includes(env.AWS.S3_BASE_URL)) {
+      // It's a full S3 URL
+      key = fileUrl.split(`${env.AWS.S3_BASE_URL}/`)[1];
+    } else if (fileUrl.startsWith('/uploads')) {
+      // It's a relative path used in the database
+      key = fileUrl.startsWith('/') ? fileUrl.substring(1) : fileUrl;
+    } else {
+      // Not an S3 compatible path
+      return;
+    }
+
+    if (!key) return;
 
     const command = new DeleteObjectCommand({
       Bucket: BUCKET_NAME,

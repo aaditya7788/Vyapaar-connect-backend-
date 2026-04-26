@@ -38,6 +38,7 @@ const verifyPhoneOtp = async (req, res) => {
       result.user.avatar = resolveAvatarUrl(result.user, req);
     }
 
+    console.log('[DEBUG] Verify Phone OTP Result:', JSON.stringify(result, null, 2));
     res.status(200).json({ status: 'success', ...result });
   } catch (err) {
     if (err.code === 'SESSION_LIMIT_REACHED') {
@@ -113,6 +114,7 @@ const verifyEmailOtp = async (req, res) => {
       result.user.avatar = resolveAvatarUrl(result.user, req);
     }
 
+    console.log('[DEBUG] Verify Email OTP Result:', JSON.stringify(result, null, 2));
     res.status(200).json({ status: 'success', ...result });
   } catch (err) {
     if (err.code === 'SESSION_LIMIT_REACHED') {
@@ -143,6 +145,7 @@ const googleSignin = async (req, res) => {
         result.user.avatar = resolveAvatarUrl(result.user, req);
     }
 
+    console.log('[DEBUG] Google Signin Result:', JSON.stringify(result, null, 2));
     res.status(200).json({ status: 'success', ...result });
   } catch (err) {
     if (err.code === 'SESSION_LIMIT_REACHED') {
