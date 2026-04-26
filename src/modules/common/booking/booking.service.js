@@ -696,6 +696,13 @@ class BookingService {
                 address: true,
                 review: { include: { serviceRatings: true } },
                 chatRoom: true,
+                user: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                        avatar: true,
+                    }
+                },
                 shop: {
                     include: {
                         community: true,

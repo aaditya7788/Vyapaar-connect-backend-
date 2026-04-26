@@ -106,53 +106,58 @@ class ChatService {
 
     async triggerPushForRecipient(roomId, senderId, message) {
         try {
-            // Only skip push if recipient is actively viewing THIS specific chat room
-            const presence = this.roomPresence.get(roomId) || new Set();
-            const isRecipientInRoom = Array.from(presence).some(uid => uid !== senderId);
-
-            if (isRecipientInRoom) {
-                console.log(`✉️ [Push] Recipient is actively in room ${roomId}. Skipping push.`);
-                return;
-            }
-
-            // Recipient is NOT in this chat room → send push regardless of global online status
-            // (They might be on a different screen, or app might be in background/closed)
-            console.log(`📤 [Push] Recipient not in room ${roomId}. Sending push notification...`);
-
+            // Recipient Check: Determine who is on the other side of this booking
             const room = await prisma.chatRoom.findUnique({
                 where: { id: roomId },
                 include: {
                     booking: {
                         include: {
-                            user: true,
-                            shop: { include: { providerProfile: true } }
+                            user: { select: { id: true, fullName: true } },
+                            shop: { 
+                                include: { 
+                                    providerProfile: { select: { userId: true } }
+                                } 
+                            }
                         }
                     }
                 }
             });
-            if (!room) return;
-
+            
+            if (!room || !room.booking) return;
             const booking = room.booking;
 
-            // Check if sender is provider or customer
-            const isProvider = senderId === booking.shop?.providerProfile?.userId;
-
-            let senderName = "User";
-            if (isProvider) {
-                senderName = booking.shop?.name || "Service Provider";
-            } else {
-                const sender = await prisma.user.findUnique({ where: { id: senderId } });
-                senderName = sender?.fullName || "Customer";
-            }
-
-            // console.log(`[Push Debug] senderId: ${senderId}, providerId: ${booking.shop?.providerProfile?.userId}, isProvider: ${isProvider}, resolvedName: ${senderName}`);
-
-            // Recipient is either the shop's user (if sender is customer) or booking's user (if sender is shop)
+            // Resolve recipient correctly
+            // If sender is the booking user (customer), recipient is the provider's USER ID
+            // If sender is NOT the booking user, recipient is the booking user (customer)
             const recipientId = (senderId === booking.userId)
-                ? booking.shop?.providerProfile?.userId
+                ? (booking.shop?.providerProfile?.userId || booking.shop?.userId)
                 : booking.userId;
 
-            console.log(`📤 [Push] Dispatching chat push to user ${recipientId} from ${senderName}`);
+            if (!recipientId) {
+                console.warn(`⚠️ [Push] Could not resolve recipientId for room ${roomId}`);
+                return;
+            }
+
+            // Only skip push if recipient is ACTIVELY in room AND has socket focus
+            const presence = this.roomPresence.get(roomId) || new Set();
+            const isRecipientInRoom = presence.has(recipientId);
+
+            if (isRecipientInRoom) {
+                console.log(`✉️ [Push] Recipient ${recipientId} is in room ${roomId}. Skipping push.`);
+                return;
+            }
+
+            console.log(`📤 [Push] Recipient ${recipientId} not in room. Sending push...`);
+
+            // Resolve sender name for display
+            let senderName = "User";
+            const isProviderSender = (senderId !== booking.userId);
+            
+            if (isProviderSender) {
+                senderName = booking.shop?.name || "Service Provider";
+            } else {
+                senderName = booking.user?.fullName || "Customer";
+            }
 
             await notificationService.sendChatPush(
                 recipientId,
@@ -162,7 +167,8 @@ class ChatService {
                     roomId,
                     senderId,
                     bookingId: booking.id,
-                    bookingUserId: booking.userId
+                    bookingUserId: booking.userId,
+                    type: 'CHAT_MESSAGE'
                 }
             );
         } catch (e) {

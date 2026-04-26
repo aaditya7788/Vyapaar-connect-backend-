@@ -11,9 +11,28 @@ const expo = new Expo();
  */
 const _normalizeUrl = (url) => {
     if (!url) return null;
-    if (url.startsWith('http')) return url;
 
-    // Fallback to environment-defined BASE_URL
+    // Smart Redirect for legacy absolute URLs pointing to old server's uploads
+    if (url.startsWith('http')) {
+        if (url.includes('/uploads/') && !url.includes(env.AWS?.S3_BASE_URL)) {
+            const parts = url.split('/uploads/');
+            const s3Base = env.AWS?.S3_BASE_URL;
+            if (s3Base) {
+                return `${s3Base.replace(/\/$/, '')}/uploads/${parts[1]}`;
+            }
+        }
+        return url;
+    }
+
+    // Use S3_BASE_URL for managed uploads (relative paths)
+    if (url.startsWith('/uploads') || url.startsWith('uploads')) {
+        const s3Base = env.AWS?.S3_BASE_URL;
+        if (s3Base) {
+            return `${s3Base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+        }
+    }
+
+    // Fallback to environment-defined BASE_URL for other assets
     const baseUrl = env.BASE_URL;
     return `${baseUrl.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
 };

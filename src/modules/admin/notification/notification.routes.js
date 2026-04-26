@@ -26,6 +26,8 @@ const campaignUpload = multer({
     }
 }).single('image');
 
+const { normalizeUrl } = require('../../common/booking/booking.notification');
+
 /**
  * @route   POST /api/admin/notifications/upload
  * @desc    Upload notification assets
@@ -48,16 +50,22 @@ router.post('/upload',
             if (!req.file) {
                 return res.status(400).json({ status: 'fail', message: 'No file uploaded' });
             }
-            // ... rest of the logic remains the same ...
 
-            const imageUrl = await uploadToS3(
+            const s3Path = await uploadToS3(
                 req.file.buffer,
                 req.file.originalname,
                 req.uploadFolder,
                 req.file.mimetype
             );
 
-            res.status(200).json({ status: 'success', imageUrl });
+            // Convert relative S3 path to absolute URL for immediate use in Mission Control
+            const fullUrl = normalizeUrl(s3Path);
+
+            res.status(200).json({ 
+                status: 'success', 
+                imageUrl: fullUrl,
+                relativePath: s3Path // Also provide relative path for DB persistence if needed
+            });
         } catch (error) {
             console.error('[Notification Upload Error]:', error);
             res.status(500).json({ status: 'error', message: error.message });

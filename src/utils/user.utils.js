@@ -3,15 +3,20 @@
  */
 const resolveAvatarUrl = (user, req) => {
   if (!user || !user.avatar) return null;
+  const env = require('../config/env');
 
-  // If already a full URL (S3), return it
+  // 1. Handle Absolute URLs
   if (user.avatar.startsWith('http')) {
+    // If it's a legacy URL pointing to old server's uploads, translate to S3
+    if (user.avatar.includes('/uploads/') && env.AWS?.S3_BASE_URL && !user.avatar.includes(env.AWS.S3_BASE_URL)) {
+      const parts = user.avatar.split('/uploads/');
+      return `${env.AWS.S3_BASE_URL}/uploads/${parts[1]}`;
+    }
     return user.avatar;
   }
 
-  // If path starts with /uploads, redirect to S3
-  if (user.avatar.startsWith('/uploads')) {
-    const env = require('../config/env');
+  // 2. Handle Relative Upload Paths
+  if (user.avatar.startsWith('/uploads') || user.avatar.startsWith('uploads')) {
     const normalizedPath = user.avatar.startsWith('/') ? user.avatar.substring(1) : user.avatar;
     return `${env.AWS.S3_BASE_URL}/${normalizedPath}`;
   }

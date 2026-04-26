@@ -21,10 +21,14 @@ const uploadSingle = async (req, res) => {
       req.file.mimetype
     );
     
+    const { normalizeUrl } = require('../booking/booking.notification');
+    const absoluteUrl = normalizeUrl(s3Url);
+    
     res.status(200).json({ 
       status: 'success', 
       message: 'File uploaded successfully',
-      url: s3Url
+      url: absoluteUrl,
+      relativePath: s3Url
     });
   } catch (error) {
     console.error('[UPLOAD ERROR]:', error);
