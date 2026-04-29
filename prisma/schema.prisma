@@ -24,6 +24,7 @@ model User {
   isOnline           Boolean             @default(false)
   lastSeen           DateTime?
   blockReason        String?
+  remarkScore        Int                 @default(0)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   bookings           Booking[]
@@ -174,6 +175,7 @@ model Shop {
   averageRating     Float           @default(0)
   reviewCount       Int             @default(0)
   jobsCompleted     Int             @default(0)
+  remarkScore       Int             @default(0)
   views             Int             @default(0)
   bookings          Booking[]
   reviews           Review[]
@@ -543,5 +545,25 @@ enum BookingStatus {
   CANCELLED
   DECLINED
   EXPIRED
+}
+
+model Remark {
+  id          String   @id @default(uuid())
+  reporterId  String
+  targetId    String
+  targetRole  String   // CUSTOMER or PROVIDER
+  category    String   // RUDE, DELAYED, FRAUD, UNPROFESSIONAL, SAFETY
+  comment     String?
+  weight      Int      @default(1) // Severity: 1 (Minor) to 5 (Critical)
+  isVerified  Boolean  @default(false)
+  appealText  String?
+  appealStatus String?  // PENDING, REJECTED, RESOLVED
+  bookingId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([targetId])
+  @@index([reporterId])
+  @@index([bookingId])
 }
 

@@ -96,7 +96,7 @@ const sendOTPEmail = async (email, otp) => {
  * @param {string} otp - The 4-digit OTP
  */
 const sendPhoneOTPEmail = async (phone, otp, targetEmail = null) => {
-  const recipient = targetEmail || env.SMTP.TEST_RECIPIENT;
+  const recipient = targetEmail || env.SMTP.SUPPORT_EMAIL;
 
   // Only send in production
   if (env.APP_ENV !== 'production') {
@@ -151,9 +151,93 @@ const sendPhoneOTPEmail = async (phone, otp, targetEmail = null) => {
   }
 };
 
+/**
+ * Send a generic email with custom subject and HTML content
+ * @param {string} email - Recipient email
+ * @param {string} subject - Email subject
+ * @param {string} html - HTML content
+ */
+const sendEmail = async (email, subject, html) => {
+  // Only send in production
+  if (env.APP_ENV !== 'production') {
+    console.log('────────────────────────────────────────────────');
+    console.log('[Mail Status] SIMULATED (Dev Mode)');
+    console.log(`[Mail Status] Recipient: ${email}`);
+    console.log(`[Mail Status] Subject: ${subject}`);
+    console.log('────────────────────────────────────────────────');
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const mailOptions = {
+      from: env.SMTP.FROM,
+      to: email,
+      subject: subject,
+      html: html,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[Mail Status] SUCCESS: ${subject} sent to ${email}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(`[Mail Status] FAILED: ${subject} to ${email}:`, error.message);
+    return { success: false };
+  }
+};
+
+/**
+ * Send a report email with attachment
+ * @param {string} email - Recipient
+ * @param {string} subject - Subject
+ * @param {Buffer} buffer - File content
+ * @param {string} filename - Attachment filename
+ */
+const sendReportEmail = async (email, subject, buffer, filename) => {
+  // Only send in production
+  if (env.APP_ENV !== 'production') {
+    console.log('────────────────────────────────────────────────');
+    console.log('[Mail Status] SIMULATED REPORT (Dev Mode)');
+    console.log(`[Mail Status] Recipient: ${email}`);
+    console.log(`[Mail Status] File: ${filename}`);
+    console.log('────────────────────────────────────────────────');
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const mailOptions = {
+      from: env.SMTP.FROM,
+      to: email,
+      subject: subject,
+      html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Your Activity Report is Ready</h2>
+                    <p>Please find your requested activity report attached to this email.</p>
+                    <br/>
+                    <p>Regards,<br/>Vyapaar Connect Team</p>
+                </div>
+            `,
+      attachments: [
+        {
+          filename: filename,
+          content: buffer
+        }
+      ]
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[Mail Status] REPORT SENT: ${filename} to ${email}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(`[Mail Status] REPORT FAILED: ${email}:`, error.message);
+    return { success: false };
+  }
+};
+
 module.exports = {
   generateOTP,
   sendOTPEmail,
   sendPhoneOTPEmail,
+  sendEmail,
+  sendReportEmail,
   transporter,
 };

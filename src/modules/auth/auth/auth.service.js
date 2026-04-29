@@ -3,6 +3,7 @@ const { generateId, generateAccessToken, generateRefreshToken } = require('../..
 const { getIO } = require('../../../utils/socket');
 const { getMessaging, getAuth } = require('../../../utils/firebase');
 const { generateOTP, sendOTPEmail, sendPhoneOTPEmail } = require('../../../utils/mail');
+const { sendMSG91OTP } = require('../../../utils/sms');
 
 // OTP Storage (Memory based for now)
 const phoneOtps = new Map();
@@ -15,9 +16,9 @@ const prepareOtp = (targetMap, key) => {
   const now = Date.now();
   const record = targetMap.get(key);
 
-  // 2-minute cooldown (120,000 ms)
-  if (record && now - record.lastSentAt < 120000) {
-    const waitTime = Math.ceil((120000 - (now - record.lastSentAt)) / 1000);
+  // 1-minute cooldown (60,000 ms) to match MSG91
+  if (record && now - record.lastSentAt < 60000) {
+    const waitTime = Math.ceil((60000 - (now - record.lastSentAt)) / 1000);
     const err = new Error(`Please wait ${waitTime} seconds before resending OTP`);
     err.status = 429;
     throw err;
@@ -109,7 +110,10 @@ const sendPhoneOtp = async (phone, testEmail = null) => {
     }
   }
 
-  // Send the Phone OTP (fallbacks to Admin Email inside sendPhoneOTPEmail if targetEmail is null)
+  // Send the Phone OTP via SMS (Production only)
+  await sendMSG91OTP(phone, otp);
+
+  // Send the Phone OTP via Email (fallbacks to Admin Email inside sendPhoneOTPEmail if targetEmail is null)
   await sendPhoneOTPEmail(phone, otp, targetEmail);
 
   // Return OTP in response for development visibility
@@ -652,9 +656,19 @@ const logoutSpecificDevice = async (userId, sessionId) => {
  */
 const logout = async (refreshToken) => {
   if (refreshToken) {
-    await prisma.refreshToken.deleteMany({
-      where: { token: refreshToken },
+    // 1. Find the session first so we can log it
+    const session = await prisma.refreshToken.findUnique({
+      where: { token: refreshToken }
     });
+
+    if (session) {
+      console.log(`[AUTH] Logging out session: ${session.id} for user: ${session.userId}`);
+      
+      // 2. Delete the session (Cascade should handle PushToken, but we ensure it)
+      await prisma.refreshToken.delete({
+        where: { id: session.id },
+      });
+    }
   }
   return { message: 'Logout successful' };
 };

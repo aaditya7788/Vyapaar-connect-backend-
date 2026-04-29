@@ -159,7 +159,7 @@ class BookingService {
                     ...extraWhere
                 },
                 include: {
-                    user: { select: { fullName: true } }
+                    user: { select: { fullName: true, remarkScore: true } }
                 }
             });
 
@@ -195,6 +195,7 @@ class BookingService {
                             displayId: booking.displayId,
                             totalAmount: booking.totalAmount,
                             userName: booking.user?.fullName || 'Customer',
+                            userRemarkScore: booking.user?.remarkScore || 0,
                             address: booking.address?.address,
                             latitude: booking.address?.latitude,
                             longitude: booking.address?.longitude,
@@ -267,9 +268,10 @@ class BookingService {
                 select: { id: true, latitude: true, longitude: true }
             });
 
-            if (shops.length === 0) throw new Error('No providers found for this service type.');
-
-            // 3. Sort by distance (Haversine)
+            if (existing) {
+                const hoursLeft = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - new Date(existing.createdAt).getTime())) / (60 * 60 * 1000));
+                throw new Error(`You have already submitted a report recently. Please wait ${hoursLeft} hours before reporting again.`);
+            }  // 3. Sort by distance (Haversine)
             const sortedShops = shops.map(shop => ({
                 id: shop.id,
                 distance: haversineDistance(address.latitude, address.longitude, shop.latitude, shop.longitude)
@@ -326,7 +328,8 @@ class BookingService {
                 bookingId: booking.id,
                 displayId: booking.displayId,
                 totalAmount: booking.totalAmount,
-                userName: booking.user?.fullName || 'Customer'
+                userName: booking.user?.fullName || 'Customer',
+                userRemarkScore: booking.user?.remarkScore || 0
             });
 
             sendPushToUser(providerUserId, {
@@ -449,7 +452,8 @@ class BookingService {
                         select: {
                             fullName: true,
                             phone: true,
-                            avatar: true
+                            avatar: true,
+                            remarkScore: true
                         }
                     },
                     address: true,
@@ -574,6 +578,7 @@ class BookingService {
                             id: true,
                             fullName: true,
                             avatar: true,
+                            remarkScore: true,
                         }
                     },
                     services: true,
@@ -763,6 +768,20 @@ class BookingService {
             });
             booking.startOtpRequired = catSettings?.startOtpRequired ?? false;
         }
+
+        // ── Check for existing reports based on dynamic cooldown ──
+        const cooldownSetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_COOLDOWN_HOURS' } });
+        const cooldownHours = cooldownSetting ? parseInt(cooldownSetting.value) : 24;
+
+        const targetId = booking.shopId;
+        const whereClause = {
+            reporterId: userId,
+            targetId,
+            bookingId: id // check specifically for THIS booking
+        };
+
+        const recentReport = await prisma.remark.findFirst({ where: whereClause });
+        booking.hasReported = !!recentReport;
 
         return this._processBooking(booking);
     }

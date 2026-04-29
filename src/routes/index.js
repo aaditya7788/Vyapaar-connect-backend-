@@ -18,6 +18,7 @@ const adminSettingsRoutes = require('../modules/admin/settings/settings.routes')
 const addressRoutes = require('../modules/customer/address/address.routes');
 const walletRoutes = require('../modules/provider/wallet/wallet.routes');
 const analyticsRoutes = require('../modules/provider/analytics/analytics.routes');
+const reportRoutes = require('../modules/provider/reports/reports.routes');
 const slotRoutes = require('../modules/provider/slots/slot.routes');
 const commonSettingsRoutes = require('../modules/common/settings/settings.routes');
 
@@ -57,6 +58,7 @@ router.use('/auth', authRoutes);
 router.use('/provider', providerRoutes);
 router.use('/provider/wallet', walletRoutes);
 router.use('/provider/analytics', analyticsRoutes);
+router.use('/provider/reports', reportRoutes);
 router.use('/provider/slots', slotRoutes);
 
 // Service Routes
@@ -95,5 +97,9 @@ router.use('/chat', chatRoutes);
 // Call Routes
 const callRoutes = require('../modules/common/call/call.routes');
 router.use('/calls', callRoutes);
+
+// Trust & Safety Routes
+const remarkRoutes = require('../modules/common/remark/remark.routes');
+router.use('/remarks', remarkRoutes);
 
 module.exports = router;

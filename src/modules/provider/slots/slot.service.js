@@ -118,12 +118,14 @@ class SlotService {
             }
         }
 
-        if (allConfigs.length === 0) return { isClosed: false, slots: [] };
+        const isHoliday = allConfigs.some(c => c.isBreak && c.label === 'Holiday');
+
+        if (allConfigs.length === 0) return { isClosed: false, isHoliday: false, slots: [] };
 
         const breaks = allConfigs.filter(c => c.isBreak);
         const activeWindows = allConfigs.filter(c => !c.isBreak);
 
-        if (activeWindows.length === 0) return { isClosed: false, slots: [] };
+        if (activeWindows.length === 0) return { isClosed: false, isHoliday, slots: [] };
 
         // 3. Fetch existing bookings
         const existingBookings = await prisma.booking.findMany({
@@ -193,7 +195,11 @@ class SlotService {
             }
         }
 
-        return { isClosed: false, slots };
+        return { 
+            isClosed: false, 
+            isHoliday,
+            slots 
+        };
     }
 
     /**

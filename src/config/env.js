@@ -25,7 +25,7 @@ const env = {
     USER: process.env.SMTP_USER,
     PASS: process.env.SMTP_PASS,
     FROM: process.env.EMAIL_FROM,
-    TEST_RECIPIENT: process.env.TEST_RECIPIENT_EMAIL || process.env.EMAIL_FROM,
+    SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || process.env.EMAIL_FROM,
   },
   AWS: {
     REGION: process.env.AWS_REGION || 'ap-south-1',
@@ -33,6 +33,11 @@ const env = {
     SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
     S3_BUCKET_NAME: process.env.AWS_S3_BUCKET_NAME,
     S3_BASE_URL: process.env.AWS_S3_BASE_URL || `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-south-1'}.amazonaws.com`,
+  },
+  DEEP_LINK_DOMAIN: process.env.DEEP_LINK_DOMAIN || 'aaditya78.dev',
+  MSG91: {
+    AUTH_KEY: process.env.MSG91_AUTH_KEY,
+    TEMPLATE_ID: process.env.MSG91_TEMPLATE_ID,
   },
 };
 

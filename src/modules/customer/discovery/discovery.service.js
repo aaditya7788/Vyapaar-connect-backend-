@@ -104,7 +104,7 @@ const getHomeFeed = async () => {
  */
 const searchDiscovery = async (filters, userId = null) => {
     const { q, category, community, page = 1, limit = 10, sortBy, lat, lng } = filters;
-    
+
     // Log search query for analytics
     if (q) {
         logSearch(q, userId, filters.communityId || null).catch(err => console.error('Logging failed:', err));
@@ -167,13 +167,20 @@ const searchDiscovery = async (filters, userId = null) => {
     const [rawShops, rawServices] = await Promise.all([
         prisma.shop.findMany({
             where: whereShop,
-            include: { community: true, services: { where: { isActive: true }, take: 2 } },
+            include: {
+                community: true,
+                services: { where: { isActive: true }, take: 2 }
+            },
             take: CAP,
             orderBy: orderBy
         }),
         prisma.service.findMany({
             where: whereService,
-            include: { shop: { include: { community: true } } },
+            include: {
+                shop: {
+                    include: { community: true }
+                }
+            },
             take: CAP,
             orderBy: orderBy
         })
@@ -201,35 +208,86 @@ const searchDiscovery = async (filters, userId = null) => {
                 const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
                 distance = R * c;
             }
+
             return { ...item, distance };
         });
     }
+
+    // Fetch penalty factor from settings (Dynamic - No hardcode)
+    const penaltySetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_PENALTY_FACTOR' } });
+    const penaltyFactor = penaltySetting ? parseFloat(penaltySetting.value) : 0.1;
+
+    const distancePenaltySetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_DISTANCE_PENALTY' } });
+    const distancePenaltyFactor = distancePenaltySetting ? parseFloat(distancePenaltySetting.value) : 10; // Default 10km per point (more aggressive)
 
     if (sortBy === 'rating') {
         mixed.sort((a, b) => {
             const rA = a.type === 'SHOP' ? (a.averageRating || 0) : (a.shop?.averageRating || 0);
             const rB = b.type === 'SHOP' ? (b.averageRating || 0) : (b.shop?.averageRating || 0);
-            return rB - rA;
+
+            // Apply remark penalty from the Shop object
+            const remA = a.type === 'SHOP' ? (a.remarkScore || 0) : (a.shop?.remarkScore || 0);
+            const remB = b.type === 'SHOP' ? (b.remarkScore || 0) : (b.shop?.remarkScore || 0);
+
+            const scoreA = parseFloat(rA) - (parseInt(remA) * penaltyFactor);
+            const scoreB = parseFloat(rB) - (parseInt(remB) * penaltyFactor);
+
+            return scoreB - scoreA;
         });
     } else if (sortBy === 'distance' && lat && lng) {
-        mixed.sort((a, b) => (a.distance || 9999) - (b.distance || 9999));
+        mixed.sort((a, b) => {
+            const remA = a.type === 'SHOP' ? (a.remarkScore || 0) : (a.shop?.remarkScore || 0);
+            const remB = b.type === 'SHOP' ? (b.remarkScore || 0) : (b.shop?.remarkScore || 0);
+
+            const distA = (a.distance || 9999) + (remA * distancePenaltyFactor);
+            const distB = (b.distance || 9999) + (remB * distancePenaltyFactor);
+
+            return distA - distB;
+        });
     } else {
-        mixed.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        // Default: Sort by Recency but sink those with high penalties
+        mixed.sort((a, b) => {
+            const timeA = new Date(a.updatedAt).getTime();
+            const timeB = new Date(b.updatedAt).getTime();
+
+            const remA = a.type === 'SHOP' ? (a.remarkScore || 0) : (a.shop?.remarkScore || 0);
+            const remB = b.type === 'SHOP' ? (b.remarkScore || 0) : (b.shop?.remarkScore || 0);
+
+            // Every penalty point "ages" the provider by 1 day in recency sort
+            const penaltyMs = 24 * 60 * 60 * 1000;
+            return (timeB - (remB * penaltyMs)) - (timeA - (remA * penaltyMs));
+        });
     }
 
     const total = mixed.length;
     const shops = mixed.slice(skip, skip + take);
 
+    const visibleThresholdSetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_VISIBLE_THRESHOLD' } });
+    const visibleThreshold = visibleThresholdSetting ? parseInt(visibleThresholdSetting.value) : 3;
+
+    const categoriesSetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_CATEGORIES_JSON' } });
+    const reportCategories = categoriesSetting ? JSON.parse(categoriesSetting.value) : [
+        { id: 'RUDE', label: 'Inappropriate Behavior', icon: 'UserX', color: '#FF5722', weight: 1 },
+        { id: 'DELAYED', label: 'Severe Delay / No Show', icon: 'Clock', color: '#FFC107', weight: 2 },
+        { id: 'UNPROFESSIONAL', label: 'Unprofessional Conduct', icon: 'AlertCircle', color: '#03A9F4', weight: 2 },
+        { id: 'FRAUD', label: 'Payment Fraud / Overcharging', icon: 'ShieldAlert', color: '#E91E63', weight: 4 },
+        { id: 'SAFETY', label: 'Safety / Security Concern', icon: 'ShieldAlert', color: '#F44336', weight: 5 }
+    ];
+
     return {
+        status: 'success',
         shops,
         meta: {
             total,
             page: parseInt(page),
             limit: take,
-            totalPages: Math.ceil(total / take)
+            totalPages: Math.ceil(total / take),
+            visibleThreshold,
+            reportCategories
         }
     };
 };
+
 
 /**
  * Get NearBy Home Services Grouped by Category
@@ -259,37 +317,59 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
         }
     });
 
+    // 1.1 Fetch penalty factors (Dynamic - No hardcode)
+    const distPenaltySetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_DISTANCE_PENALTY' } });
+    const distPenalty = distPenaltySetting ? parseFloat(distPenaltySetting.value) : 5;
+
+    const penaltySetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_PENALTY_FACTOR' } });
+    const penaltyFactor = penaltySetting ? parseFloat(penaltySetting.value) : 0.1;
+
     let shops = [];
     if (lat && lng) {
+        const radiusSetting = await prisma.globalSettings.findUnique({ where: { key: 'RADIUS_FILTER_KM' } });
+        const radius = radiusSetting ? parseFloat(radiusSetting.value) : 15;
+
+        const strictSetting = await prisma.globalSettings.findUnique({ where: { key: 'STRICT_KM_FILTER' } });
+        const isStrict = strictSetting ? strictSetting.value === 'true' : true;
+
+        const effectiveRadius = radiusKm ? parseFloat(radiusKm) : radius;
         const latFloat = parseFloat(lat);
         const lngFloat = parseFloat(lng);
+
+        console.log('🔍 [HomeServices] Search params:', { lat, lng, radius, isStrict, effectiveRadius, distPenalty });
+
         if (isStrict) {
             // HA strict enforcement - hide everything beyond the radius
             shops = await prisma.$queryRaw`
                 SELECT * FROM (
-                    SELECT id, name, "profileImage", latitude, longitude,
+                    SELECT id, name, "profileImage", latitude, longitude, "remarkScore", category,
                     (6371 * acos(cos(radians(${latFloat})) * cos(radians(latitude)) * cos(radians(longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(latitude)))) AS distance
                     FROM "Shop"
                     WHERE status = 'VERIFIED' AND latitude IS NOT NULL AND longitude IS NOT NULL
                 ) AS nearby_shops
                 WHERE distance <= ${effectiveRadius}
-                ORDER BY distance ASC 
+                ORDER BY (distance + (COALESCE("remarkScore", 0) * ${distPenalty})) ASC
             `;
         } else {
-            // HA relaxed enforcement - "turn off it will more than that too"
-            // Shows nearby things first, but doesn't cut off at the radius limit. Cap at 50 to prevent memory blowouts.
+            // HA relaxed enforcement
             shops = await prisma.$queryRaw`
-                SELECT id, name, "profileImage", latitude, longitude,
-                (6371 * acos(cos(radians(${latFloat})) * cos(radians(latitude)) * cos(radians(longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(latitude)))) AS distance
-                FROM "Shop"
-                WHERE status = 'VERIFIED' AND latitude IS NOT NULL AND longitude IS NOT NULL
+                SELECT * FROM (
+                    SELECT id, name, "profileImage", latitude, longitude, "remarkScore", category,
+                    (6371 * acos(cos(radians(${latFloat})) * cos(radians(latitude)) * cos(radians(longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(latitude)))) AS distance
+                    FROM "Shop"
+                    WHERE status = 'VERIFIED' AND latitude IS NOT NULL AND longitude IS NOT NULL
+                ) AS nearby_shops
+                ORDER BY (distance + (COALESCE("remarkScore", 0) * ${distPenalty})) ASC
                 LIMIT 50
             `;
         }
+
+        console.log(`✅ [HomeServices] Found ${shops?.length || 0} shops nearby.`);
+
     } else {
         shops = await prisma.shop.findMany({
             where: { status: 'VERIFIED' },
-            select: { id: true, name: true, profileImage: true, latitude: true, longitude: true }
+            select: { id: true, name: true, profileImage: true, latitude: true, longitude: true, remarkScore: true }
         });
         shops = shops.map(s => ({ ...s, distance: null }))
     }
@@ -312,12 +392,14 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
                         profileImage: true,
                         averageRating: true,
                         reviewCount: true,
+                        remarkScore: true,
                         community: true
                     }
                 }
             }
         });
     }
+    console.log(`[DISCOVERY DEBUG]: Found ${services.length} active services for these shops.`);
 
     // 4. Group by category
     const sections = categories.map(cat => {
@@ -328,12 +410,14 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
             (srv.subcategories && srv.subcategories.some(sub => subcatNames.includes(sub)))
         ).map(srv => {
             const shopMatch = shops.find(s => s.id === srv.shopId);
+            const score = parseFloat(srv.shop?.averageRating || 0) - (parseInt(srv.shop?.remarkScore || 0) * penaltyFactor);
             return {
                 ...srv,
                 distance: shopMatch ? shopMatch.distance : null,
-                supportsQuantity: cat.supportsQuantity || false
+                supportsQuantity: cat.supportsQuantity || false,
+                sortScore: score
             };
-        });
+        }).sort((a, b) => b.sortScore - a.sortScore);
 
         return {
             categoryId: cat.id,
@@ -357,7 +441,7 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
 const logSearch = async (query, userId = null, communityId = null) => {
     try {
         if (!query || query.trim().length === 0) return;
-        
+
         await prisma.searchLog.create({
             data: {
                 query: query.trim().toLowerCase(),

@@ -266,25 +266,29 @@ const sendPushToUser = async (userId, { title, body }, data = {}, channelId = 'b
         // 2. Fetch all active push tokens for this user
         const tokens = await prisma.pushToken.findMany({
             where: { userId },
-            select: { token: true }
+            select: { token: true, platform: true, sessionId: true }
         });
 
-        console.log(`[Push] User ${userId} has ${tokens.length} active device tokens`);
+        // 3. Deduplicate tokens (ensure unique strings)
+        const uniqueTokens = [...new Set(tokens.map(t => t.token))];
 
-        if (tokens.length === 0) {
+        console.log(`[Push] User ${userId} has ${tokens.length} tokens (${uniqueTokens.length} unique). Devices:`, 
+            tokens.map(t => `${t.platform || 'unknown'}${t.sessionId ? ' (S)' : ''}`).join(', ')
+        );
+
+        if (uniqueTokens.length === 0) {
             console.log(`[Push] No push tokens found for user ${userId}.`);
             return { successCount: 0, failureCount: 0 };
         }
 
-        const registrationTokens = tokens.map(t => t.token);
         // Tag the push payload with the targetContext and ID
-        const result = await _dispatchToServices(registrationTokens, { title, body }, {
+        const result = await _dispatchToServices(uniqueTokens, { title, body }, {
             ...data,
             notificationId: dbNotification.id,
             targetContext: data.targetContext || 'customer'
         }, channelId);
 
-        console.log(`[Push] Successfully sent to ${result.successCount} devices for user ${userId}`);
+        console.log(`[Push] Successfully sent to ${result.successCount}/${uniqueTokens.length} unique devices for user ${userId}`);
         return result;
     } catch (error) {
         console.error('[Push] Fatal error sending notification:', error.message);
