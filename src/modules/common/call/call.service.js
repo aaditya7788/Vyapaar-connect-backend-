@@ -91,15 +91,17 @@ class CallService {
         try {
             await sendPushToUser(actualReceiverId, {
                 title: '📞 Incoming Call',
-                body: `${caller.fullName || 'Someone'} is calling...`
+                body: `${caller.fullName || 'Someone'} is calling...`,
+                priority: 'high', // 🚀 Force high priority for killed state
             }, {
                 type: 'VOIP_CALL',
                 uuid: call.id,
                 callerName: caller.fullName || 'Service Provider',
                 channelName,
                 token,
-                skipHistory: true, // 🚀 Fix: Don't clutter notification history with calls
-                zegoAppId: process.env.ZEGO_APP_ID || process.env.AGORA_APP_ID
+                skipHistory: true,
+                zegoAppId: process.env.ZEGO_APP_ID || process.env.AGORA_APP_ID,
+                priority: 'high' // 🚀 Also in data payload
             }, 'booking-alerts');
         } catch (fcmError) {
             console.error('📞 [CallService] Signaling failed:', fcmError.message);
