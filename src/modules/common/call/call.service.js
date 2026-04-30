@@ -27,36 +27,40 @@ class CallService {
             throw new Error('Unauthorized to call for this booking');
         }
 
-        // ── CALL LOCK GUARD ──
-        // Skip check if manually unlocked via coins
+        // ── CALL LOCK GUARD (Timezone Aware: IST +05:30) ──
         if (!booking.isCallUnlocked) {
             try {
                 const now = new Date();
                 const scheduledDateStr = booking.scheduledDate.toISOString().split('T')[0];
                 
-                // Parse Time (Handles "09:30 AM" or "09:30")
-                let timeStr = booking.scheduledTime || "00:00";
+                // 1. Parse Time
+                let timeStr = (booking.scheduledTime || "00:00").trim();
                 let hours = 0, minutes = 0;
                 
-                if (timeStr.includes(' ')) {
+                if (timeStr.toLowerCase().includes('am') || timeStr.toLowerCase().includes('pm')) {
                     const [time, period] = timeStr.split(' ');
                     [hours, minutes] = time.split(':').map(Number);
-                    if (period === 'PM' && hours < 12) hours += 12;
-                    if (period === 'AM' && hours === 12) hours = 0;
+                    if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
+                    if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
                 } else {
                     [hours, minutes] = timeStr.split(':').map(Number);
                 }
 
-                const scheduledDateTime = new Date(`${scheduledDateStr}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`);
-                const unlockWindowStart = new Date(scheduledDateTime.getTime() - 20 * 60000);
+                // 2. Construct Date in IST (+05:30)
+                // We format it as a proper ISO string with the +05:30 offset
+                const isoString = `${scheduledDateStr}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00+05:30`;
+                const scheduledDateTime = new Date(isoString);
+                
+                // 3. Unlock window (Allow 60 minutes before the slot)
+                const unlockWindowStart = new Date(scheduledDateTime.getTime() - 60 * 60000);
 
                 if (now < unlockWindowStart) {
-                    throw new Error('Call is locked until 20 minutes before the scheduled slot or until manually unlocked.');
+                    const minutesLeft = Math.ceil((unlockWindowStart - now) / 60000);
+                    throw new Error(`Call is locked. It will unlock in ${minutesLeft} minutes (at ${unlockWindowStart.toLocaleTimeString()}).`);
                 }
             } catch (e) {
                 if (e.message.includes('locked')) throw e;
-                console.error('📞 [CallService] Guard error:', e.message);
-                // On parsing error, we default to allowing if the status is active
+                console.warn('📞 [CallService] Guard parsing skipped:', e.message);
             }
         }
 
@@ -94,7 +98,8 @@ class CallService {
                 callerName: caller.fullName || 'Service Provider',
                 channelName,
                 token,
-                agoraAppId: process.env.AGORA_APP_ID
+                skipHistory: true, // 🚀 Fix: Don't clutter notification history with calls
+                zegoAppId: process.env.ZEGO_APP_ID || process.env.AGORA_APP_ID
             }, 'booking-alerts');
         } catch (fcmError) {
             console.error('📞 [CallService] Signaling failed:', fcmError.message);
@@ -104,7 +109,7 @@ class CallService {
             callId: call.id,
             channelName,
             token,
-            agoraAppId: process.env.AGORA_APP_ID
+            zegoAppId: process.env.ZEGO_APP_ID || process.env.AGORA_APP_ID
         };
     }
 

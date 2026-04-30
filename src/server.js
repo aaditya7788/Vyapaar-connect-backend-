@@ -17,6 +17,10 @@ socketUtils.init(server);
 const { initializeFirebase } = require('./utils/firebase');
 initializeFirebase();
 
+// Initialize Background Tasks (Data Retention)
+const { startCleanupTask } = require('./utils/cleanup');
+startCleanupTask();
+
 server.listen(PORT, () => {
     console.log(`🚀 Server running in ${env.APP_ENV.toUpperCase()} mode on port ${PORT}`);
 });

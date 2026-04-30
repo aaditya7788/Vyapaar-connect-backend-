@@ -1,7 +1,7 @@
 {
   "name": "vyapaar-connect-backend",
   "version": "1.0.0",
-  "description": "Vyapaar Connect — Service Marketplace Backend",
+  "description": "OnePointSolution — Service Marketplace Backend",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",

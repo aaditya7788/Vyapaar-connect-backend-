@@ -248,20 +248,25 @@ const _dispatchToFirebaseOnly = async (registrationTokens, { title, body }, data
 };
 
 /**
- * Send a push notification to a specific user and save to history
+ * Send a push notification to a specific user and optionally save to history
  */
 const sendPushToUser = async (userId, { title, body }, data = {}, channelId = 'booking-alerts') => {
     try {
-        // 1. Save to Notification History in DB
-        const dbNotification = await prisma.notification.create({
-            data: {
-                userId,
-                title,
-                body,
-                type: data.type || 'GENERAL',
-                data: { ...data, targetContext: data.targetContext || 'customer' }
-            }
-        });
+        let notificationId = null;
+
+        // 1. Save to Notification History in DB (Unless explicitly skipped)
+        if (!data.skipHistory) {
+            const dbNotification = await prisma.notification.create({
+                data: {
+                    userId,
+                    title,
+                    body,
+                    type: data.type || 'GENERAL',
+                    data: { ...data, targetContext: data.targetContext || 'customer' }
+                }
+            });
+            notificationId = dbNotification.id;
+        }
 
         // 2. Fetch all active push tokens for this user
         const tokens = await prisma.pushToken.findMany({
@@ -272,10 +277,6 @@ const sendPushToUser = async (userId, { title, body }, data = {}, channelId = 'b
         // 3. Deduplicate tokens (ensure unique strings)
         const uniqueTokens = [...new Set(tokens.map(t => t.token))];
 
-        console.log(`[Push] User ${userId} has ${tokens.length} tokens (${uniqueTokens.length} unique). Devices:`, 
-            tokens.map(t => `${t.platform || 'unknown'}${t.sessionId ? ' (S)' : ''}`).join(', ')
-        );
-
         if (uniqueTokens.length === 0) {
             console.log(`[Push] No push tokens found for user ${userId}.`);
             return { successCount: 0, failureCount: 0 };
@@ -284,7 +285,7 @@ const sendPushToUser = async (userId, { title, body }, data = {}, channelId = 'b
         // Tag the push payload with the targetContext and ID
         const result = await _dispatchToServices(uniqueTokens, { title, body }, {
             ...data,
-            notificationId: dbNotification.id,
+            notificationId: notificationId || data.notificationId,
             targetContext: data.targetContext || 'customer'
         }, channelId);
 
@@ -354,13 +355,13 @@ module.exports = {
         return await sendPushToUser(userId, {
             title: `💬 ${senderName}`,
             body: content.length > 100 ? content.substring(0, 100) + '...' : content
-        }, { ...data, profileKey: 'CHAT_MESSAGE', type: 'CHAT_UI', categoryId: 'chat_messages' }, 'chat-messages');
+        }, { ...data, profileKey: 'CHAT_MESSAGE', type: 'CHAT_UI', categoryId: 'chat_messages', skipHistory: true }, 'chat-messages');
     },
     sendCallPush: async (userId, senderName, data) => {
         return await sendPushToUser(userId, {
             title: `📞 Incoming Call`,
             body: `${senderName} is calling...`
-        }, { ...data, profileKey: 'INC_CALL', type: 'CALL_UI' });
+        }, { ...data, profileKey: 'INC_CALL', type: 'CALL_UI', skipHistory: true });
     },
     normalizeUrl: _normalizeUrl
 };

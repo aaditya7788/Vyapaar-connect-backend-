@@ -149,21 +149,29 @@ const registerPushToken = async (req, res) => {
 };
 
 /**
- * Get notification history for current user
+ * Get notification history for current user (Paginated)
  */
 const getNotifications = async (req, res) => {
   try {
-    const notifications = await prisma.notification.findMany({
-      where: { userId: req.user.id },
-      orderBy: { createdAt: 'desc' },
-      take: 50
-    });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const skip = (page - 1) * limit;
+
+    // Get count and data in parallel for speed
+    const [total, notifications] = await Promise.all([
+      prisma.notification.count({ where: { userId: req.user.id } }),
+      prisma.notification.findMany({
+        where: { userId: req.user.id },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+      })
+    ]);
 
     // Normalize image URLs in data payload
     const env = require('../../../config/env');
     const normalizedHistory = notifications.map(notif => {
       if (notif.data) {
-        // Handle images in notification metadata
         const fixUrl = (url) => {
           if (!url || url.startsWith('http')) return url;
           if (url.startsWith('/uploads')) {
@@ -180,7 +188,16 @@ const getNotifications = async (req, res) => {
       return notif;
     });
 
-    res.status(200).json({ status: 'success', data: normalizedHistory });
+    res.status(200).json({ 
+      status: 'success', 
+      data: normalizedHistory,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
