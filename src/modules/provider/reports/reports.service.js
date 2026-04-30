@@ -49,39 +49,45 @@ const generateActivityReport = async (shopId, startDate, endDate, format = 'pdf'
  * Helper: Generate Excel File
  */
 async function generateExcel(shop, bookings, stats, start, end) {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Activity Report');
+    try {
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Activity Report');
 
-    // Headers
-    sheet.columns = [
-        { header: 'Date', key: 'date', width: 15 },
-        { header: 'Booking ID', key: 'id', width: 20 },
-        { header: 'Customer', key: 'customer', width: 25 },
-        { header: 'Services', key: 'services', width: 40 },
-        { header: 'Status', key: 'status', width: 15 },
-        { header: 'Amount', key: 'amount', width: 15 },
-    ];
+        // Headers
+        sheet.columns = [
+            { header: 'Date', key: 'date', width: 15 },
+            { header: 'Booking ID', key: 'id', width: 20 },
+            { header: 'Customer', key: 'customer', width: 25 },
+            { header: 'Services', key: 'services', width: 40 },
+            { header: 'Status', key: 'status', width: 15 },
+            { header: 'Amount', key: 'amount', width: 15 },
+        ];
 
-    // Data
-    bookings.forEach(b => {
-        sheet.addRow({
-            date: b.createdAt.toLocaleDateString(),
-            id: b.displayId || b.id.substring(0, 8),
-            customer: b.user?.fullName || 'N/A',
-            services: b.services.map(s => s.name).join(', '),
-            status: b.status,
-            amount: b.totalAmount
+        // Data
+        bookings.forEach(b => {
+            const dateStr = b.createdAt instanceof Date ? b.createdAt.toISOString().split('T')[0] : String(b.createdAt);
+            sheet.addRow({
+                date: dateStr,
+                id: b.displayId || b.id.substring(0, 8),
+                customer: b.user?.fullName || 'N/A',
+                services: b.services.map(s => s.name).join(', '),
+                status: b.status,
+                amount: b.totalAmount
+            });
         });
-    });
 
-    // Summary at the bottom
-    sheet.addRow({});
-    sheet.addRow({ date: 'SUMMARY' });
-    sheet.addRow({ date: 'Total Bookings', id: stats.totalBookings });
-    sheet.addRow({ date: 'Completed', id: stats.completedBookings.length });
-    sheet.addRow({ date: 'Total Earnings', id: stats.completedAmount });
+        // Summary at the bottom
+        sheet.addRow({});
+        sheet.addRow({ date: 'SUMMARY' });
+        sheet.addRow({ date: 'Total Bookings', id: stats.totalBookings });
+        sheet.addRow({ date: 'Completed', id: stats.completedBookings.length });
+        sheet.addRow({ date: 'Total Earnings', id: stats.completedAmount });
 
-    return await workbook.xlsx.writeBuffer();
+        return await workbook.xlsx.writeBuffer();
+    } catch (err) {
+        console.error('[REPORTS] Error in Excel generation:', err);
+        throw err;
+    }
 }
 
 /**
@@ -89,160 +95,176 @@ async function generateExcel(shop, bookings, stats, start, end) {
  */
 async function generatePDF(shop, bookings, stats, start, end) {
     return new Promise((resolve, reject) => {
-        const doc = new PDFDocument({ 
-            margin: 40,
-            size: 'A4',
-            bufferPages: true,
-            info: { Title: 'Business Activity Report', Author: 'Vyapaar Connect' }
-        });
-        
-        // Register Custom Fonts for Rupee Support
-        const regularFont = path.join(__dirname, '../../../assets/fonts/inter_regular.ttf');
-        const boldFont = path.join(__dirname, '../../../assets/fonts/inter_bold.ttf');
-        
-        doc.registerFont('Inter-Regular', regularFont);
-        doc.registerFont('Inter-Bold', boldFont);
-        
-        // Set Default Font
-        doc.font('Inter-Regular');
-
-        let buffers = [];
-        doc.on('data', buffers.push.bind(buffers));
-        doc.on('end', () => resolve(Buffer.concat(buffers)));
-
-        // --- THEME COLORS ---
-        const colors = {
-            primary: '#2E7D32',
-            secondary: '#1B5E20',
-            text: '#333333',
-            muted: '#666666',
-            border: '#EEEEEE',
-            bg: '#F9F9F9'
-        };
-
-        // --- HEADER ---
-        console.log('[REPORTS] Building Header...');
-        doc.rect(0, 0, 595, 100).fill(colors.primary);
-        doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(24).text('VYAPAAR CONNECT', 40, 30, { characterSpacing: 2 });
-        doc.font('Inter-Regular').fontSize(10).text('OFFICIAL BUSINESS REPORT', 40, 60);
-        
-        doc.fillColor('#FFFFFF').fontSize(12).text(String(shop.name).toUpperCase(), 400, 35, { align: 'right' });
-        doc.fontSize(10).text(`Generated: ${new Date().toLocaleDateString()}`, 400, 55, { align: 'right' });
-        doc.text(`Period: ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`, 400, 70, { align: 'right' });
-
-        doc.moveDown(4);
-
-        // --- 4-GRID ANALYTICS SECTION ---
-        console.log('[REPORTS] Building Analytics Grid...');
-        doc.fillColor(colors.text).font('Inter-Bold').fontSize(16).text('Business Performance', 40, 120);
-        doc.rect(40, 140, 520, 1).fill(colors.border);
-        
-        const gridTop = 160;
-        
-        // Views
-        doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('TOTAL VIEWS', 40, gridTop);
-        doc.fillColor(colors.primary).font('Inter-Bold').fontSize(18).text(String(shop.views || 0), 40, gridTop + 15);
-        
-        // Leads
-        doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('TOTAL LEADS', 180, gridTop);
-        doc.fillColor(colors.primary).font('Inter-Bold').fontSize(18).text(String(stats.totalBookings || 0), 180, gridTop + 15);
-        
-        // Completed
-        doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('COMPLETED', 320, gridTop);
-        doc.fillColor(colors.primary).font('Inter-Bold').fontSize(18).text(String(stats.completedBookings.length || 0), 320, gridTop + 15);
-        
-        // Revenue
-        doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('REVENUE', 460, gridTop);
-        doc.fillColor('#2E7D32').font('Inter-Bold').fontSize(18).text(`₹${String(stats.completedAmount.toFixed(0))}`, 460, gridTop + 15);
-
-        doc.moveDown(5);
-
-        // --- TOP SERVICES PERFORMANCE ---
-        console.log('[REPORTS] Building Service Insights...');
-        const serviceStats = {};
-        bookings.forEach(b => {
-            b.services.forEach(s => {
-                if (!serviceStats[s.id]) serviceStats[s.id] = { name: s.name, count: 0, revenue: 0 };
-                serviceStats[s.id].count++;
-                if (b.status === 'COMPLETED') serviceStats[s.id].revenue += (s.price || 0);
+        try {
+            const doc = new PDFDocument({ 
+                margin: 40,
+                size: 'A4',
+                bufferPages: true,
+                info: { Title: 'Business Activity Report', Author: 'Vyapaar Connect' }
             });
-        });
 
-        const topServices = Object.values(serviceStats).sort((a, b) => b.count - a.count).slice(0, 5);
+            // Handle errors
+            doc.on('error', (err) => {
+                console.error('[PDF GENERATION ERROR]:', err);
+                reject(err);
+            });
+            
+            // Register Custom Fonts for Rupee Support
+            const regularFont = path.join(__dirname, '../../../assets/fonts/inter_regular.ttf');
+            const boldFont = path.join(__dirname, '../../../assets/fonts/inter_bold.ttf');
+            
+            doc.registerFont('Inter-Regular', regularFont);
+            doc.registerFont('Inter-Bold', boldFont);
+            
+            // Set Default Font
+            doc.font('Inter-Regular');
 
-        doc.fillColor(colors.text).font('Inter-Bold').fontSize(14).text('Service Insights', 40, 230);
-        let serviceY = 255;
-        
-        // Table Header for services
-        doc.rect(40, serviceY, 520, 20).fill('#F5F5F5');
-        doc.fillColor(colors.muted).font('Inter-Regular').fontSize(9);
-        doc.text('SERVICE NAME', 50, serviceY + 6);
-        doc.text('REQUESTS', 300, serviceY + 6);
-        doc.text('EST. REVENUE', 450, serviceY + 6);
-        
-        serviceY += 25;
-        topServices.forEach(s => {
-            doc.fillColor(colors.text).font('Inter-Regular').fontSize(10).text(String(s.name), 50, serviceY);
-            doc.text(String(s.count), 300, serviceY);
-            doc.text(`₹${String(s.revenue.toFixed(0))}`, 450, serviceY);
-            doc.rect(40, serviceY + 12, 520, 0.5).fill(colors.border);
-            serviceY += 20;
-        });
+            let buffers = [];
+            doc.on('data', buffers.push.bind(buffers));
+            doc.on('end', () => {
+                console.log('[REPORTS] PDF Stream Ended, resolving buffer');
+                resolve(Buffer.concat(buffers));
+            });
 
-        // --- RECENT BOOKINGS LOG ---
-        console.log('[REPORTS] Building Activity Log...');
-        doc.moveDown(2);
-        const logTop = serviceY + 20;
-        doc.fillColor(colors.text).font('Inter-Bold').fontSize(14).text('Activity Log (Last 50)', 40, logTop);
-        
-        let logY = logTop + 25;
-        doc.rect(40, logY, 520, 20).fill(colors.primary);
-        doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(8);
-        doc.text('DATE', 50, logY + 7);
-        doc.text('CUSTOMER', 110, logY + 7);
-        doc.text('SERVICES', 220, logY + 7);
-        doc.text('STATUS', 400, logY + 7);
-        doc.text('AMOUNT', 480, logY + 7);
+            // --- THEME COLORS ---
+            const colors = {
+                primary: '#2E7D32',
+                secondary: '#1B5E20',
+                text: '#333333',
+                muted: '#666666',
+                border: '#EEEEEE',
+                bg: '#F9F9F9'
+            };
 
-        logY += 25;
-        bookings.slice(0, 50).forEach(b => {
-            if (logY > 750) {
-                doc.addPage();
-                logY = 50;
-                doc.rect(40, logY, 520, 20).fill(colors.primary);
-                doc.fillColor('#FFFFFF').text('DATE', 50, logY + 7);
-                doc.text('CUSTOMER', 110, logY + 7);
-                doc.text('SERVICES', 220, logY + 7);
-                doc.text('STATUS', 400, logY + 7);
-                doc.text('AMOUNT', 480, logY + 7);
-                logY += 25;
+            // --- HEADER ---
+            console.log('[REPORTS] Building Header...');
+            doc.rect(0, 0, 595, 100).fill(colors.primary);
+            doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(24).text('VYAPAAR CONNECT', 40, 30, { characterSpacing: 2 });
+            doc.font('Inter-Regular').fontSize(10).text('OFFICIAL BUSINESS REPORT', 40, 60);
+            
+            doc.fillColor('#FFFFFF').fontSize(12).text(String(shop.name || 'Your Shop').toUpperCase(), 400, 35, { align: 'right' });
+            doc.fontSize(10).text(`Generated: ${new Date().toLocaleDateString()}`, 400, 55, { align: 'right' });
+            doc.text(`Period: ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`, 400, 70, { align: 'right' });
+
+            doc.moveDown(4);
+
+            // --- 4-GRID ANALYTICS SECTION ---
+            console.log('[REPORTS] Building Analytics Grid...');
+            doc.fillColor(colors.text).font('Inter-Bold').fontSize(16).text('Business Performance', 40, 120);
+            doc.rect(40, 140, 520, 1).fill(colors.border);
+            
+            const gridTop = 160;
+            
+            // Views
+            doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('TOTAL VIEWS', 40, gridTop);
+            doc.fillColor(colors.primary).font('Inter-Bold').fontSize(18).text(String(shop.views || 0), 40, gridTop + 15);
+            
+            // Leads
+            doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('TOTAL LEADS', 180, gridTop);
+            doc.fillColor(colors.primary).font('Inter-Bold').fontSize(18).text(String(stats.totalBookings || 0), 180, gridTop + 15);
+            
+            // Completed
+            doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('COMPLETED', 320, gridTop);
+            doc.fillColor(colors.primary).font('Inter-Bold').fontSize(18).text(String(stats.completedBookings.length || 0), 320, gridTop + 15);
+            
+            // Revenue
+            doc.fillColor(colors.muted).font('Inter-Regular').fontSize(10).text('REVENUE', 460, gridTop);
+            const revenue = typeof stats.completedAmount === 'number' ? stats.completedAmount : 0;
+            doc.fillColor('#2E7D32').font('Inter-Bold').fontSize(18).text(`₹${revenue.toFixed(0)}`, 460, gridTop + 15);
+
+            doc.moveDown(5);
+
+            // --- TOP SERVICES PERFORMANCE ---
+            console.log('[REPORTS] Building Service Insights...');
+            const serviceStats = {};
+            bookings.forEach(b => {
+                b.services.forEach(s => {
+                    if (!serviceStats[s.id]) serviceStats[s.id] = { name: s.name, count: 0, revenue: 0 };
+                    serviceStats[s.id].count++;
+                    if (b.status === 'COMPLETED') serviceStats[s.id].revenue += (s.price || 0);
+                });
+            });
+
+            const topServices = Object.values(serviceStats).sort((a, b) => b.count - a.count).slice(0, 5);
+
+            doc.fillColor(colors.text).font('Inter-Bold').fontSize(14).text('Service Insights', 40, 230);
+            let serviceY = 255;
+            
+            // Table Header for services
+            doc.rect(40, serviceY, 520, 20).fill('#F5F5F5');
+            doc.fillColor(colors.muted).font('Inter-Regular').fontSize(9);
+            doc.text('SERVICE NAME', 50, serviceY + 6);
+            doc.text('REQUESTS', 300, serviceY + 6);
+            doc.text('EST. REVENUE', 450, serviceY + 6);
+            
+            serviceY += 25;
+            topServices.forEach(s => {
+                doc.fillColor(colors.text).font('Inter-Regular').fontSize(10).text(String(s.name), 50, serviceY);
+                doc.text(String(s.count), 300, serviceY);
+                const sRevenue = typeof s.revenue === 'number' ? s.revenue : 0;
+                doc.text(`₹${sRevenue.toFixed(0)}`, 450, serviceY);
+                doc.rect(40, serviceY + 12, 520, 0.5).fill(colors.border);
+                serviceY += 20;
+            });
+
+            // --- RECENT BOOKINGS LOG ---
+            console.log('[REPORTS] Building Activity Log...');
+            doc.moveDown(2);
+            const logTop = serviceY + 20;
+            doc.fillColor(colors.text).font('Inter-Bold').fontSize(14).text('Activity Log (Last 50)', 40, logTop);
+            
+            let logY = logTop + 25;
+            doc.rect(40, logY, 520, 20).fill(colors.primary);
+            doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(8);
+            doc.text('DATE', 50, logY + 7);
+            doc.text('CUSTOMER', 110, logY + 7);
+            doc.text('SERVICES', 220, logY + 7);
+            doc.text('STATUS', 400, logY + 7);
+            doc.text('AMOUNT', 480, logY + 7);
+
+            logY += 25;
+            bookings.slice(0, 50).forEach(b => {
+                if (logY > 750) {
+                    doc.addPage();
+                    logY = 50;
+                    doc.rect(40, logY, 520, 20).fill(colors.primary);
+                    doc.fillColor('#FFFFFF').text('DATE', 50, logY + 7);
+                    doc.text('CUSTOMER', 110, logY + 7);
+                    doc.text('SERVICES', 220, logY + 7);
+                    doc.text('STATUS', 400, logY + 7);
+                    doc.text('AMOUNT', 480, logY + 7);
+                    logY += 25;
+                }
+
+                doc.fillColor(colors.text).font('Inter-Regular').fontSize(8);
+                doc.text(b.createdAt.toLocaleDateString(), 50, logY);
+                doc.text(String(b.user?.fullName || 'N/A').substring(0, 15), 110, logY);
+                doc.text(String(b.services.map(s => s.name).join(', ')).substring(0, 35), 220, logY);
+                
+                const statusColor = b.status === 'COMPLETED' ? '#2E7D32' : b.status === 'CANCELLED' ? '#C62828' : '#F57C00';
+                doc.fillColor(statusColor).text(String(b.status), 400, logY);
+                doc.fillColor(colors.text).text(`₹${String(b.totalAmount || 0)}`, 480, logY);
+                
+                doc.rect(40, logY + 10, 520, 0.5).fill(colors.border);
+                logY += 18;
+            });
+
+            // --- FOOTER ---
+            const pageCount = doc.bufferedPageRange().count;
+            for (let i = 0; i < pageCount; i++) {
+                doc.switchToPage(i);
+                doc.fillColor(colors.muted).fontSize(8).text(
+                    `Page ${i + 1} of ${pageCount} | Vyapaar Connect Business Intel`,
+                    40, 800, { align: 'center' }
+                );
             }
 
-            doc.fillColor(colors.text).font('Inter-Regular').fontSize(8);
-            doc.text(b.createdAt.toLocaleDateString(), 50, logY);
-            doc.text(String(b.user?.fullName || 'N/A').substring(0, 15), 110, logY);
-            doc.text(String(b.services.map(s => s.name).join(', ')).substring(0, 35), 220, logY);
-            
-            const statusColor = b.status === 'COMPLETED' ? '#2E7D32' : b.status === 'CANCELLED' ? '#C62828' : '#F57C00';
-            doc.fillColor(statusColor).text(String(b.status), 400, logY);
-            doc.fillColor(colors.text).text(`₹${String(b.totalAmount || 0)}`, 480, logY);
-            
-            doc.rect(40, logY + 10, 520, 0.5).fill(colors.border);
-            logY += 18;
-        });
-
-        // --- FOOTER ---
-        const pageCount = doc.bufferedPageRange().count;
-        for (let i = 0; i < pageCount; i++) {
-            doc.switchToPage(i);
-            doc.fillColor(colors.muted).fontSize(8).text(
-                `Page ${i + 1} of ${pageCount} | Vyapaar Connect Business Intel`,
-                40, 800, { align: 'center' }
-            );
+            doc.end();
+            console.log('[REPORTS] PDF doc.end() called');
+        } catch (err) {
+            console.error('[REPORTS] Synchronous error in PDF generation:', err);
+            reject(err);
         }
-
-        doc.end();
-        console.log('[REPORTS] PDF Generation Finished Successfully');
     });
 }
 

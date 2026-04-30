@@ -99,11 +99,29 @@ const toggleStatus = async (req, res) => {
     }
 };
 
+/**
+ * Get a single service by ID
+ */
+const getServiceById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const service = await serviceService.getServiceById(id);
+        if (!service) {
+            return response.error(res, 'Service not found', 'NOT_FOUND', 404);
+        }
+        return response.success(res, 'Service fetched successfully', service);
+    } catch (error) {
+        console.error('[SERVICE CONTROLLER ERROR (DETAIL)]:', error);
+        return response.error(res, 'Failed to fetch service detail');
+    }
+};
+
 module.exports = {
     createService,
     getShopServices,
     updateService,
     deleteService,
     toggleStatus,
-    checkAvailability
+    checkAvailability,
+    getServiceById
 };

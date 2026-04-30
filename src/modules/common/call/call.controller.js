@@ -19,7 +19,7 @@ class CallController {
 
             res.status(201).json({ status: 'success', data: result });
         } catch (error) {
-            console.warn('📞 [CallController] Initiation Rejected:', error.message);
+            console.error('Call initiation error:', error);
             res.status(400).json({ error: error.message });
         }
     }

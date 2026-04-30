@@ -18,7 +18,7 @@ const downloadReport = async (req, res) => {
         // Calculate Date Range
         const now = new Date();
         let startDate = new Date();
-        const endDate = now;
+        let endDate = now;
 
         if (range === 'week') {
             startDate.setDate(now.getDate() - 7);
@@ -81,7 +81,16 @@ const downloadReport = async (req, res) => {
 
     } catch (error) {
         console.error('[REPORT DOWNLOAD ERROR]:', error);
-        res.status(500).json({ status: 'error', message: 'Failed to generate report.' });
+        
+        if (error.message === 'Shop not found') {
+            return res.status(404).json({ status: 'error', message: 'The specified shop was not found.' });
+        }
+
+        res.status(500).json({ 
+            status: 'error', 
+            message: 'An internal error occurred during report generation.',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 };
 

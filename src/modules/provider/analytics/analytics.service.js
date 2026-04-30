@@ -98,6 +98,46 @@ const getShopAnalytics = async (shopId) => {
         thisWeekData.push(count);
     }
 
+    // 4.1 Last Week Calculation
+    const lastMonday = new Date(monday);
+    lastMonday.setDate(lastMonday.getDate() - 7);
+    const lastWeekData = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(lastMonday);
+        d.setDate(d.getDate() + i);
+        d.setHours(0, 0, 0, 0);
+        const endD = new Date(d);
+        endD.setHours(23, 59, 59, 999);
+        
+        const count = await prisma.booking.count({
+            where: {
+                shopId,
+                createdAt: { gte: d, lte: endD }
+            }
+        });
+        lastWeekData.push(count);
+    }
+    const lastWeekTotal = lastWeekData.reduce((a, b) => a + b, 0);
+    const prevLastWeekTotal = 0; // Can be enhanced if needed
+
+    // 4.2 This Month Calculation (4 Weekly Blocks)
+    const thisMonthData = [];
+    for (let i = 0; i < 4; i++) {
+        const endR = new Date(now);
+        endR.setDate(now.getDate() - (i * 7));
+        const startR = new Date(now);
+        startR.setDate(now.getDate() - ((i + 1) * 7));
+        
+        const count = await prisma.booking.count({
+            where: {
+                shopId,
+                createdAt: { gte: startR, lte: endR }
+            }
+        });
+        thisMonthData.unshift(count); // Reverse order to show oldest week first
+    }
+    const thisMonthTotal = thisMonthData.reduce((a, b) => a + b, 0);
+
     // 5. Customer Insights
     const uniqueCustomers = await prisma.booking.groupBy({
         by: ['userId'],
@@ -202,19 +242,19 @@ const getShopAnalytics = async (shopId) => {
             thisWeek: {
                 data: thisWeekData,
                 labels: thisWeekLabels.slice(0, thisWeekData.length),
-                summary: { current: currentMetrics.bookings, previous: previousMetrics.bookings },
+                summary: { current: thisWeekData.reduce((a, b) => a + b, 0), previous: lastWeekTotal },
                 previous: null 
             },
             lastWeek: {
-                data: [0, 0, 0, 0, 0, 0, 0],
+                data: lastWeekData,
                 labels: thisWeekLabels,
-                summary: { current: 0, previous: 0 },
+                summary: { current: lastWeekTotal, previous: prevLastWeekTotal },
                 previous: null
             },
             thisMonth: {
-                data: [0, 0, 0, 0],
+                data: thisMonthData,
                 labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-                summary: { current: 0, previous: 0 },
+                summary: { current: thisMonthTotal, previous: previousMetrics.bookings },
                 previous: null
             }
         },
