@@ -8,8 +8,8 @@ const createService = async (req, res) => {
     try {
         const { shopId, name, price, duration, category } = req.body;
         
-        if (!shopId || !name || !price || !duration || !category) {
-            return response.error(res, 'Missing required fields', 'VALIDATION_ERROR', 400);
+        if (!shopId || !name || price === undefined || price === null || !duration || !category) {
+            return response.error(res, 'Missing required fields (shopId, name, price, duration, category)', 'VALIDATION_ERROR', 400);
         }
 
         const service = await serviceService.createService(req.body);

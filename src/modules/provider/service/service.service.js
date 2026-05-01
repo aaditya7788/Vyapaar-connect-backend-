@@ -42,7 +42,7 @@ const CLEAN_DATA = async (data) => {
     const cleaned = {
         name: data.name,
         description: data.description,
-        price: data.price ? parseFloat(data.price) : undefined,
+        price: (data.price !== undefined && data.price !== null) ? parseFloat(data.price) : undefined,
         duration: data.duration,
         category,
         subcategories: subcategories || [],
@@ -62,7 +62,24 @@ const CLEAN_DATA = async (data) => {
  */
 const createService = async (serviceData) => {
     const data = await CLEAN_DATA(serviceData);
-    const service = await prisma.service.create({ data });
+    
+    // Extract configurable inclusions if any
+    const configurableInclusions = serviceData.configurableInclusions;
+    
+    if (Array.isArray(configurableInclusions)) {
+        data.configurableInclusions = {
+            create: configurableInclusions.map(inc => ({
+                name: inc.name,
+                price: parseFloat(inc.price || 0),
+                isRequired: !!inc.isRequired
+            }))
+        };
+    }
+
+    const service = await prisma.service.create({ 
+        data,
+        include: { configurableInclusions: true }
+    });
     return mapServiceCategories(service);
 };
 
@@ -97,6 +114,7 @@ const getServicesByShop = async (shopId, requestingUserId = null) => {
 
     const services = await prisma.service.findMany({
         where,
+        include: { configurableInclusions: true },
         orderBy: { name: 'asc' }
     });
     
@@ -108,7 +126,8 @@ const getServicesByShop = async (shopId, requestingUserId = null) => {
  */
 const getServiceById = async (id) => {
     const service = await prisma.service.findUnique({
-        where: { id }
+        where: { id },
+        include: { configurableInclusions: true }
     });
     return mapServiceCategories(service);
 };
@@ -121,9 +140,26 @@ const updateService = async (id, serviceData) => {
     const existing = await prisma.service.findUnique({ where: { id } });
     
     const data = await CLEAN_DATA(serviceData);
+    
+    // Extract and handle configurable inclusions sync
+    const configurableInclusions = serviceData.configurableInclusions;
+    if (Array.isArray(configurableInclusions)) {
+        // Delete existing and recreate for simplicity in this version
+        await prisma.serviceInclusion.deleteMany({ where: { serviceId: id } });
+        
+        data.configurableInclusions = {
+            create: configurableInclusions.map(inc => ({
+                name: inc.name,
+                price: parseFloat(inc.price || 0),
+                isRequired: !!inc.isRequired
+            }))
+        };
+    }
+
     const service = await prisma.service.update({
         where: { id },
-        data
+        data,
+        include: { configurableInclusions: true }
     });
 
     // Cleanup old image if replaced
@@ -138,17 +174,29 @@ const updateService = async (id, serviceData) => {
  * Delete a service
  */
 const deleteService = async (id) => {
-    const existing = await prisma.service.findUnique({ where: { id } });
-    
-    const deleted = await prisma.service.delete({
-        where: { id }
-    });
+    try {
+        const existing = await prisma.service.findUnique({ where: { id } });
+        
+        const deleted = await prisma.service.delete({
+            where: { id }
+        });
 
-    if (existing && existing.image) {
-        deleteFile(existing.image);
+        if (existing && existing.image) {
+            deleteFile(existing.image);
+        }
+
+        return deleted;
+    } catch (error) {
+        // P2003: Foreign key constraint violation (e.g. service is linked to a booking)
+        if (error.code === 'P2003') {
+            console.log(`[SERVICE DELETE] Service ${id} has linked bookings. Performing soft-delete instead.`);
+            return await prisma.service.update({
+                where: { id },
+                data: { isActive: false }
+            });
+        }
+        throw error;
     }
-
-    return deleted;
 };
 
 /**

@@ -77,10 +77,22 @@ const getSearchInsights = async (req, res) => {
   }
 };
 
+const getServiceInclusions = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await discoveryService.getServiceInclusions(id);
+    res.status(200).json({ status: 'success', inclusions: data });
+  } catch (error) {
+    console.error('[SERVICE INCLUSIONS ERROR]:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch service inclusions.' });
+  }
+};
+
 module.exports = {
   getHomeData,
   searchDiscovery,
   getHomeServices,
   getTrendingKeywords,
-  getSearchInsights
+  getSearchInsights,
+  getServiceInclusions
 };

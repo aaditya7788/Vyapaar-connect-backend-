@@ -32,4 +32,10 @@ router.get('/trending-keywords', discoveryController.getTrendingKeywords);
  */
 router.get('/insights', discoveryController.getSearchInsights);
 
+/**
+ * GET /discovery/service/:id/inclusions
+ * Returns inclusions for a specific service
+ */
+router.get('/service/:id/inclusions', discoveryController.getServiceInclusions);
+
 module.exports = router;

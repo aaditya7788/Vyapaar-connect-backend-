@@ -68,32 +68,31 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
                 for (let i = 0; i < fcmTokens.length; i += CHUNK_SIZE) {
                     const chunk = fcmTokens.slice(i, i + CHUNK_SIZE);
                     const message = {
-                        notification: {
-                            title,
-                            body,
-                            image: bannerUrl // Standard FCM image field
-                        },
-                        android: {
+                        // Include system notification block ONLY if not data-only
+                        ...(!data.isDataOnly && {
                             notification: {
-                                channelId: channelId,
-                                priority: 'max',
-                                sound: 'default',
-                                defaultSound: true,
-                                notificationPriority: 'priority_max',
-                                imageUrl: bannerUrl
-                            }
-                        },
-                        apns: {
-                            payload: {
-                                aps: {
-                                    'mutable-content': 1 // Required for iOS rich media notifications
+                                title,
+                                body,
+                                image: bannerUrl
+                            },
+                            android: {
+                                notification: {
+                                    channelId: channelId,
+                                    priority: 'max',
+                                    sound: 'default',
+                                    defaultSound: true,
+                                    notificationPriority: 'priority_max',
+                                    imageUrl: bannerUrl
                                 }
                             }
-                        },
+                        }),
+                        // Data payload is ALWAYS sent
                         data: {
                             ...data,
-                            imageUrl: bannerUrl || data.imageUrl,
-                            sponsoredImageUrl: sponsoredUrl || data.sponsoredImageUrl,
+                            title: title || '',
+                            body: body || '',
+                            imageUrl: bannerUrl || data.imageUrl || '',
+                            sponsoredImageUrl: sponsoredUrl || data.sponsoredImageUrl || '',
                             channelId: channelId,
                         },
                         tokens: chunk,
@@ -190,30 +189,32 @@ const _dispatchToFirebaseOnly = async (registrationTokens, { title, body }, data
                 const CHUNK_SIZE = 500;
                 for (let i = 0; i < fcmTokens.length; i += CHUNK_SIZE) {
                     const chunk = fcmTokens.slice(i, i + CHUNK_SIZE);
-                    
+
                     // Match the EXACT payload from Mission Control Script
                     const message = {
-                        notification: { 
-                            title, 
-                            body, 
-                            image: bannerUrl 
-                        },
+                        ...(!data.isDataOnly && {
+                            notification: {
+                                title,
+                                body,
+                                image: bannerUrl
+                            },
+                            android: {
+                                priority: 'high',
+                                notification: {
+                                    channelId: 'booking-alerts',
+                                    priority: 'max',
+                                    icon: 'notifications_icon',
+                                    color: '#4F8F6A',
+                                    sound: 'default'
+                                }
+                            }
+                        }),
                         data: {
                             ...data,
-                            title,
-                            body,
-                            image: bannerUrl || data.imageUrl,
+                            title: title || '',
+                            body: body || '',
+                            image: bannerUrl || data.imageUrl || '',
                             channelId: 'booking-alerts',
-                        },
-                        android: {
-                            priority: 'high',
-                            notification: {
-                                channelId: 'booking-alerts',
-                                priority: 'max',
-                                icon: 'notifications_icon',
-                                color: '#4F8F6A',
-                                sound: 'default'
-                            }
                         },
                         tokens: chunk,
                     };
@@ -228,7 +229,7 @@ const _dispatchToFirebaseOnly = async (registrationTokens, { title, body }, data
                         response.responses.forEach((resp, idx) => {
                             if (!resp.success) {
                                 const errorCode = resp.error?.code;
-                                if (errorCode === 'messaging/registration-token-not-registered' || 
+                                if (errorCode === 'messaging/registration-token-not-registered' ||
                                     errorCode === 'messaging/invalid-registration-token') {
                                     invalidTokens.push(chunk[idx]);
                                 }

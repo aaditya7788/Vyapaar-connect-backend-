@@ -115,28 +115,63 @@ class BookingService {
         const activeCutoff = new Date(now.getTime() - activeTimeoutHours * 60 * 60 * 1000);
 
         try {
-            // 0. Process On-Demand Dispatch Queue (New Phase 110.2)
+            // 0. Process On-Demand Dispatch Queue
             await this.processDispatchQueue(extraWhere);
 
-            // 1. Expire stale PENDING requests (Normal bookings)
-            await prisma.booking.updateMany({
+            // 1. Identify bookings that will expire now
+            const toExpire = await prisma.booking.findMany({
                 where: {
-                    status: 'PENDING',
-                    createdAt: { lt: pendingCutoff },
-                    ...extraWhere,
+                    OR: [
+                        { status: 'PENDING', createdAt: { lt: pendingCutoff } },
+                        { status: { in: ['CONFIRMED', 'ARRIVED', 'IN_PROGRESS'] }, updatedAt: { lt: activeCutoff } }
+                    ],
+                    ...extraWhere
                 },
-                data: { status: 'EXPIRED' },
+                select: { 
+                    id: true, 
+                    userId: true,
+                    scheduledTime: true,
+                    totalAmount: true,
+                    shop: { select: { category: true } },
+                    items: {
+                        include: { service: true },
+                        take: 1
+                    }
+                }
             });
 
-            // 2. Expire stale ACTIVE jobs (Unfinished after 4 hours)
-            await prisma.booking.updateMany({
-                where: {
-                    status: { in: ['CONFIRMED', 'ARRIVED', 'IN_PROGRESS'] },
-                    updatedAt: { lt: activeCutoff },
-                    ...extraWhere,
-                },
-                data: { status: 'EXPIRED' },
-            });
+            if (toExpire.length > 0) {
+                const ids = toExpire.map(b => b.id);
+                
+                // 2. Perform bulk update
+                await prisma.booking.updateMany({
+                    where: { id: { in: ids } },
+                    data: { status: 'EXPIRED' }
+                });
+
+                // 3. Notify affected users (Limited to 20 per sweep)
+                for (const booking of toExpire.slice(0, 20)) {
+                    this._emit(`user_${booking.userId}`, 'booking_updated', {
+                        bookingId: booking.id,
+                        status: 'EXPIRED'
+                    });
+
+                    sendPushToUser(booking.userId, {
+                        title: 'Order Expired',
+                        body: 'Your booking has expired as it was not processed in time.'
+                    }, {
+                        type: 'booking_status',
+                        bookingId: booking.id,
+                        status: 'EXPIRED',
+                        category: booking.shop?.category,
+                        serviceName: booking.items?.[0]?.service?.name || 'Service',
+                        scheduledTime: booking.scheduledTime,
+                        totalAmount: booking.totalAmount || 0,
+                        targetContext: 'customer',
+                        isDataOnly: true // 🚀 Prevent duplicates
+                    });
+                }
+            }
         } catch (err) {
             this._logError('Lazy-expiry sweep error', err);
         }
@@ -159,7 +194,9 @@ class BookingService {
                     ...extraWhere
                 },
                 include: {
-                    user: { select: { fullName: true, remarkScore: true } }
+                    user: { select: { fullName: true, remarkScore: true } },
+                    items: { include: { service: true } },
+                    address: true
                 }
             });
 
@@ -203,7 +240,8 @@ class BookingService {
                                 name: item.service?.name,
                                 image: item.service?.image,
                                 price: item.price,
-                                quantity: item.quantity
+                                quantity: item.quantity,
+                                metadata: item.metadata
                             })) || booking.services?.map(s => ({ name: s.name, image: s.image, price: s.price })),
                             itemCount: booking.items?.length || booking.services?.length,
                             scheduledTime: booking.scheduledTime,
@@ -235,13 +273,18 @@ class BookingService {
                     });
 
                     sendPushToUser(booking.userId, {
-                        title: 'Booking Expired',
-                        body: 'We couldn\'t find a provider for your request. Please try again later.'
+                        title: 'Order Expired',
+                        body: 'Your booking has expired as it was not processed in time.'
                     }, {
                         type: 'booking_status',
                         bookingId: booking.id,
                         status: 'EXPIRED',
-                        targetContext: 'customer'
+                        category: booking.items?.[0]?.service?.category || 'Service',
+                        serviceName: booking.items?.[0]?.service?.name || 'Service',
+                        scheduledTime: booking.scheduledTime,
+                        totalAmount: booking.totalAmount || 0,
+                        targetContext: 'customer',
+                        isDataOnly: true // 🚀 Fix: Prevent duplicates
                     });
                 }
             }
@@ -308,7 +351,8 @@ class BookingService {
                         create: services.map(s => ({
                             serviceId: s.serviceId,
                             quantity: s.quantity || 1,
-                            price: s.price
+                            price: s.price,
+                            metadata: s.metadata || (s.selectedInclusions ? { selectedInclusions: s.selectedInclusions } : null)
                         }))
                     },
                     chatRoom: {
@@ -329,7 +373,20 @@ class BookingService {
                 displayId: booking.displayId,
                 totalAmount: booking.totalAmount,
                 userName: booking.user?.fullName || 'Customer',
-                userRemarkScore: booking.user?.remarkScore || 0
+                userRemarkScore: booking.user?.remarkScore || 0,
+                address: booking.address?.address,
+                latitude: booking.address?.latitude,
+                longitude: booking.address?.longitude,
+                servicesList: booking.items?.map(item => ({
+                    name: item.service?.name,
+                    image: item.service?.image,
+                    price: item.price,
+                    quantity: item.quantity,
+                    metadata: item.metadata
+                })),
+                itemCount: booking.items?.length,
+                scheduledTime: booking.scheduledTime,
+                createdAt: booking.createdAt
             });
 
             sendPushToUser(providerUserId, {
@@ -430,7 +487,8 @@ class BookingService {
                         create: services.map(s => ({
                             serviceId: s.serviceId,
                             quantity: s.quantity || 1,
-                            price: s.price
+                            price: s.price,
+                            metadata: s.metadata || (s.selectedInclusions ? { selectedInclusions: s.selectedInclusions } : null)
                         }))
                     },
                     // Backward compatibility
@@ -483,7 +541,8 @@ class BookingService {
                     name: item.service?.name,
                     image: item.service?.image,
                     price: item.price,
-                    quantity: item.quantity
+                    quantity: item.quantity,
+                    metadata: item.metadata
                 })) || booking.services?.map(s => ({ name: s.name, image: s.image, price: s.price })),
                 itemCount: booking.items?.length || booking.services?.length,
                 scheduledTime: booking.scheduledTime,
@@ -981,7 +1040,7 @@ class BookingService {
             if (status === 'CANCELLED' && booking.status !== 'PENDING') {
                 throw new Error('This booking is already confirmed and cannot be cancelled. Please contact support.');
             }
-            
+
             // Allow customers to update status (e.g., to RE-PENDING or similar) if it's currently PENDING
             if (status !== 'CANCELLED' && booking.status !== 'PENDING') {
                 throw new Error('Customers can only cancel bookings once they are confirmed.');
@@ -1059,15 +1118,20 @@ class BookingService {
             };
 
             if (statusMessages[status]) {
-                sendPushToUser(booking.userId, {
+                sendPushToUser(updatedBooking.userId, {
                     title: `Booking Update: ${status}`,
                     body: statusMessages[status]
                 }, {
                     type: 'booking_status',
                     bookingId: id,
                     status,
-                    shopId: booking.shopId,
-                    targetContext: 'customer'
+                    shopId: updatedBooking.shopId,
+                    category: updatedBooking.shop?.category,
+                    serviceName: updatedBooking.items?.[0]?.service?.name || 'Service',
+                    scheduledTime: updatedBooking.scheduledTime,
+                    totalAmount: updatedBooking.totalAmount || 0,
+                    targetContext: 'customer',
+                    isDataOnly: true // 🚀 Fix: Prevent duplicates
                 });
             }
 
@@ -1119,7 +1183,10 @@ class BookingService {
                 createdAt: now // Reset creation time for fresh priority
             },
             include: {
-                shop: { include: { providerProfile: true } }
+                shop: { include: { providerProfile: true } },
+                items: { include: { service: true } },
+                address: true,
+                user: { select: { fullName: true, remarkScore: true } }
             }
         });
 
@@ -1129,7 +1196,21 @@ class BookingService {
             bookingId: updated.id,
             displayId: updated.displayId,
             totalAmount: updated.totalAmount,
-            userName: booking.user?.fullName || 'Customer'
+            userName: updated.user?.fullName || 'Customer',
+            userRemarkScore: updated.user?.remarkScore || 0,
+            address: updated.address?.address,
+            latitude: updated.address?.latitude,
+            longitude: updated.address?.longitude,
+            servicesList: updated.items?.map(item => ({
+                name: item.service?.name,
+                image: item.service?.image,
+                price: item.price,
+                quantity: item.quantity,
+                metadata: item.metadata
+            })),
+            itemCount: updated.items?.length,
+            scheduledTime: updated.scheduledTime,
+            createdAt: updated.createdAt
         });
 
         return updated;

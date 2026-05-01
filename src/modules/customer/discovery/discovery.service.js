@@ -169,7 +169,11 @@ const searchDiscovery = async (filters, userId = null) => {
             where: whereShop,
             include: {
                 community: true,
-                services: { where: { isActive: true }, take: 2 }
+                services: { 
+                    where: { isActive: true }, 
+                    take: 2,
+                    include: { configurableInclusions: true }
+                }
             },
             take: CAP,
             orderBy: orderBy
@@ -190,6 +194,34 @@ const searchDiscovery = async (filters, userId = null) => {
         ...rawShops.map(s => ({ type: 'SHOP', ...s })),
         ...rawServices.map(s => ({ type: 'SERVICE', ...s }))
     ];
+
+    // Surgical Fetch: Get category settings for these results
+    const categoryNames = [...new Set(mixed.map(m => m.category).filter(Boolean))];
+    const catSettings = await prisma.category.findMany({
+        where: { name: { in: categoryNames } },
+        select: { name: true, supportsInclusions: true }
+    });
+
+    mixed = mixed.map(item => {
+        const setting = catSettings.find(c => c.name === item.category);
+        const isModular = setting?.supportsInclusions || false;
+
+        // If it's a shop, also tag its nested services
+        if (item.type === 'SHOP' && item.services) {
+            item.services = item.services.map(srv => {
+                const srvSetting = catSettings.find(c => c.name === (srv.category || item.category));
+                return {
+                    ...srv,
+                    is_inclusion: srvSetting?.supportsInclusions || false
+                };
+            });
+        }
+
+        return {
+            ...item,
+            is_inclusion: isModular
+        };
+    });
 
     if (lat && lng) {
         const latFloat = parseFloat(lat);
@@ -529,11 +561,19 @@ const getSearchInsights = async (days = 30) => {
     return insights;
 };
 
+const getServiceInclusions = async (serviceId) => {
+    return prisma.serviceInclusion.findMany({
+        where: { serviceId },
+        orderBy: { name: 'asc' }
+    });
+};
+
 module.exports = {
     getHomeFeed,
     searchDiscovery,
     getHomeServices,
     logSearch,
     getTrendingKeywords,
-    getSearchInsights
+    getSearchInsights,
+    getServiceInclusions
 };
