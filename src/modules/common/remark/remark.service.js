@@ -36,54 +36,44 @@ class RemarkService {
      * Submit a new remark/report
      */
     async createRemark({ reporterId, targetId, targetRole, category, comment, bookingId }) {
-        return await prisma.$transaction(async (tx) => {
-            // 1. Verify that the booking exists and involves both parties
+        // 1. Database Transaction (Keep it Lean)
+        const remark = await prisma.$transaction(async (tx) => {
+            // A. Verify that the booking exists and involves both parties
             if (bookingId) {
                 const booking = await tx.booking.findUnique({
                     where: { id: bookingId },
                 });
 
                 if (!booking) throw new Error('Booking not found');
-                
-                // Ensure party logic
+
                 const isCustomerReportingProvider = targetRole === 'PROVIDER' && booking.userId === reporterId;
                 const isProviderReportingCustomer = targetRole === 'CUSTOMER' && booking.userId === targetId;
-                
+
                 if (!isCustomerReportingProvider && !isProviderReportingCustomer) {
                     throw new Error('You can only report users involved in this booking.');
                 }
             }
 
-            // 2. Check for duplicate reports for the same target by same reporter
+            // B. Check for duplicate reports
             const cooldownSetting = await tx.globalSettings.findUnique({ where: { key: 'REMARK_COOLDOWN_HOURS' } });
             const cooldownHours = cooldownSetting ? parseInt(cooldownSetting.value) : 24;
 
-            const whereClause = {
-                reporterId,
-                targetId,
-                bookingId
-            };
-
+            const whereClause = { reporterId, targetId, bookingId };
             if (cooldownHours > 0) {
-                whereClause.createdAt = {
-                    gte: new Date(Date.now() - cooldownHours * 60 * 60 * 1000)
-                };
+                whereClause.createdAt = { gte: new Date(Date.now() - cooldownHours * 60 * 60 * 1000) };
             }
 
             const existing = await tx.remark.findFirst({ where: whereClause });
-
             if (existing) {
-                if (cooldownHours === 0) {
-                    throw new Error('You have already submitted a report for this user.');
-                }
+                if (cooldownHours === 0) throw new Error('You have already submitted a report for this user.');
                 const hoursLeft = Math.ceil((cooldownHours * 60 * 60 * 1000 - (Date.now() - new Date(existing.createdAt).getTime())) / (60 * 60 * 1000));
                 throw new Error(`You have already submitted a report recently. Please wait ${hoursLeft} hours before reporting again.`);
             }
 
             const weight = await this._getCategoryWeight(category);
 
-            // 3. Create the Remark
-            const remark = await tx.remark.create({
+            // C. Create the Remark
+            return await tx.remark.create({
                 data: {
                     reporterId,
                     targetId,
@@ -94,83 +84,87 @@ class RemarkService {
                     bookingId
                 }
             });
+        }, { timeout: 15000 }); // Increase timeout to 15s
 
-            // 4. Score is NOT updated here anymore - only after Admin verdict
-            // 5. Notify both parties
-            try {
-                // Fetch target email and details
-                let targetUser;
-                if (targetRole === 'CUSTOMER') {
-                    targetUser = await tx.user.findUnique({ where: { id: targetId }, select: { id: true, email: true, fullName: true, remarkScore: true } });
-                } else {
-                    const shop = await tx.shop.findUnique({ 
-                        where: { id: targetId }, 
-                        include: { providerProfile: { include: { user: { select: { id: true, email: true, fullName: true } } } } } 
-                    });
-                    targetUser = shop?.providerProfile?.user;
-                    targetUser.remarkScore = shop?.remarkScore || 0;
-                }
+        // 2. Post-Transaction Notifications (Don't block the UI or DB)
+        this._notifyReportSubmitted(remark, reporterId).catch(err => {
+            console.error('[RemarkService] Async notification failed:', err.message);
+        });
 
-                const reporter = await tx.user.findUnique({ where: { id: reporterId }, select: { email: true, fullName: true } });
+        return remark;
+    }
 
-                // Notify Target
-                const targetTitle = '🛡️ Trust & Safety Update';
-                const targetBody = `A report has been filed regarding your service. Our moderation team is currently reviewing the details.`;
-                
-                await sendPushToUser(targetUser.id, {
-                    title: targetTitle,
-                    body: targetBody
-                }, { type: 'TRUST_SAFETY_ALERT', remarkId: remark.id, targetContext: targetRole.toLowerCase() });
+    /**
+     * Async notification helper for new reports
+     */
+    async _notifyReportSubmitted(remark, reporterId) {
+        try {
+            const { targetId, targetRole, category, bookingId } = remark;
 
-                if (targetUser.email) {
-                    const appLink = `https://${env.DEEP_LINK_DOMAIN}/trust-safety`;
-                    await sendEmail(targetUser.email, targetTitle, `
-                        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 30px; border: 1px solid #e0e0e0; border-radius: 16px; background-color: #ffffff;">
-                            <div style="text-align: center; margin-bottom: 20px;">
-                                <h1 style="color: #4F8F6A; margin: 0; font-size: 24px;">🛡️ Trust & Safety Update</h1>
-                            </div>
-                            
-                            <p style="color: #333; font-size: 16px;">Hello ${targetUser.fullName || 'User'},</p>
-                            <p style="color: #555; line-height: 1.6;">
-                                A report has been filed regarding your service (Ref: ${bookingId?.slice(-6).toUpperCase() || 'N/A'}). 
-                                <b>Category:</b> ${category}.
-                            </p>
-                            
-                            <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 4px solid #4F8F6A;">
-                                <h4 style="margin-top: 0; color: #4F8F6A;">What is Trust & Safety?</h4>
-                                <p style="font-size: 14px; color: #666; margin-bottom: 0;">
-                                    Our moderation system ensures a fair and high-quality marketplace. Verified reports result in penalty points that affect your discovery ranking:
-                                    <br/>• Each point reduces your visible rating by <b>0.1</b>.
-                                    <br/>• Each point adds a <b>1 km</b> virtual distance penalty in search results.
-                                </p>
-                            </div>
-
-                            <p style="color: #555;">Our team is currently reviewing the report. You will be notified of the final verdict within 24-48 hours.</p>
-
-                            <div style="text-align: center; margin-top: 30px;">
-                                <a href="${appLink}" style="background-color: #4F8F6A; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
-                                    Check Your Trust Status
-                                </a>
-                                <p style="font-size: 12px; color: #888; margin-top: 10px;">Clicking the button will open the Vyapaar Connect app.</p>
-                            </div>
-                            
-                            <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;"/>
-                            <p style="font-size: 12px; color: #aaa; text-align: center;">OnePointSolution Moderation Team</p>
-                        </div>
-                    `);
-                }
-
-                // Notify Reporter
-                await sendPushToUser(reporterId, {
-                    title: '✅ Report Submitted',
-                    body: 'Your report has been received and is under review by our moderation team.'
-                }, { type: 'REPORT_SUBMITTED', remarkId: remark.id });
-            } catch (err) {
-                console.error('[RemarkService] Notification failed:', err.message);
+            // Fetch necessary details (outside transaction)
+            let targetUser;
+            if (targetRole === 'CUSTOMER') {
+                targetUser = await prisma.user.findUnique({ where: { id: targetId }, select: { id: true, email: true, fullName: true } });
+            } else {
+                const shop = await prisma.shop.findUnique({
+                    where: { id: targetId },
+                    include: { providerProfile: { include: { user: { select: { id: true, email: true, fullName: true } } } } }
+                });
+                targetUser = shop?.providerProfile?.user;
             }
 
-            return remark;
-        });
+            const reporter = await prisma.user.findUnique({ where: { id: reporterId }, select: { fullName: true } });
+            if (!targetUser) return;
+
+            // Notify Target via Push
+            const targetTitle = '🛡️ Trust & Safety Update';
+            const targetBody = `A report has been filed regarding your service. Our moderation team is currently reviewing the details.`;
+
+            await sendPushToUser(targetUser.id, {
+                title: targetTitle,
+                body: targetBody
+            }, { type: 'TRUST_SAFETY_ALERT', remarkId: remark.id, targetContext: targetRole.toLowerCase() });
+
+            // Notify Target via Email
+            if (targetUser.email) {
+                const appLink = `https://${env.DEEP_LINK_DOMAIN}/trust-safety`;
+                await sendEmail(targetUser.email, targetTitle, `
+                    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 30px; border: 1px solid #e0e0e0; border-radius: 16px; background-color: #ffffff;">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <h1 style="color: #4F8F6A; margin: 0; font-size: 24px;">🛡️ Trust & Safety Update</h1>
+                        </div>
+                        <p style="color: #333; font-size: 16px;">Hello ${targetUser.fullName || 'User'},</p>
+                        <p style="color: #555; line-height: 1.6;">
+                            A report has been filed regarding your service (Ref: ${bookingId?.slice(-6).toUpperCase() || 'N/A'}). 
+                            <b>Category:</b> ${category}.
+                        </p>
+                        <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 4px solid #4F8F6A;">
+                            <h4 style="margin-top: 0; color: #4F8F6A;">What is Trust & Safety?</h4>
+                            <p style="font-size: 14px; color: #666; margin-bottom: 0;">
+                                Our moderation system ensures a fair and high-quality marketplace. Verified reports result in penalty points that affect your discovery ranking.
+                            </p>
+                        </div>
+                        <p style="color: #555;">Our team is currently reviewing the report. You will be notified of the final verdict within 24-48 hours.</p>
+                        <div style="text-align: center; margin-top: 30px;">
+                            <a href="${appLink}" style="background-color: #4F8F6A; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                                Check Your Trust Status
+                            </a>
+                        </div>
+                        <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;"/>
+                        <p style="font-size: 12px; color: #aaa; text-align: center;">OnePointSolution Moderation Team</p>
+                    </div>
+                `).catch(e => console.warn('[RemarkService] Target email failed:', e.message));
+            }
+
+            // Notify Reporter via Push
+            await sendPushToUser(reporterId, {
+                title: '✅ Report Submitted',
+                body: 'Your report has been received and is under review.'
+            }, { type: 'REPORT_SUBMITTED', remarkId: remark.id });
+
+        } catch (err) {
+            console.error('[RemarkService] Notification async task failed:', err.message);
+        }
     }
 
     /**
@@ -182,7 +176,7 @@ class RemarkService {
 
         // Check if user owns the target (User ID or Shop ID)
         let isOwner = remark.targetId === userId;
-        
+
         if (!isOwner && remark.targetRole === 'PROVIDER') {
             const shop = await prisma.shop.findUnique({
                 where: { id: remark.targetId },
@@ -224,7 +218,9 @@ class RemarkService {
     /**
      * Get remarks for a user/shop (Admin View)
      */
-    async getRemarksForTarget(targetId) {
+    async getRemarksForTarget(targetId, page = 1, limit = 20) {
+        const skip = (page - 1) * limit;
+
         // Find if this is a user and if they have shops
         const shops = await prisma.shop.findMany({
             where: { providerProfile: { userId: targetId } },
@@ -233,102 +229,85 @@ class RemarkService {
 
         const targetIds = [targetId, ...shops.map(s => s.id)];
 
+        const total = await prisma.remark.count({
+            where: { targetId: { in: targetIds } }
+        });
+
         const remarks = await prisma.remark.findMany({
             where: { targetId: { in: targetIds } },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit
         });
 
         // Map shop names for display
-        return remarks.map(r => {
+        const items = remarks.map(r => {
             const shop = shops.find(s => s.id === r.targetId);
             return { ...r, shopName: shop?.name };
         });
+
+        return {
+            items,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        };
     }
 
     /**
      * Verify or Dismiss a remark (Admin Moderation)
      */
     async moderateRemark(remarkId, action, moderatorId) {
-        return await prisma.$transaction(async (tx) => {
-            const remark = await tx.remark.findUnique({ 
-                where: { id: remarkId }
-            });
+        // 1. Transactional Update
+        const updatedRemark = await prisma.$transaction(async (tx) => {
+            const remark = await tx.remark.findUnique({ where: { id: remarkId } });
             if (!remark) throw new Error('Remark not found');
 
-            let updatedRemark = remark;
+            let result = remark;
 
             if (action === 'VERIFY') {
-                // Only increment if not already verified (prevent double penalty)
                 if (!remark.isVerified) {
                     if (remark.targetRole === 'CUSTOMER') {
-                        await tx.user.update({
-                            where: { id: remark.targetId },
-                            data: { remarkScore: { increment: remark.weight } }
-                        });
+                        await tx.user.update({ where: { id: remark.targetId }, data: { remarkScore: { increment: remark.weight } } });
                     } else {
-                        await tx.shop.update({
-                            where: { id: remark.targetId },
-                            data: { remarkScore: { increment: remark.weight } }
-                        });
+                        await tx.shop.update({ where: { id: remark.targetId }, data: { remarkScore: { increment: remark.weight } } });
                     }
 
-                    // NEW: If there was a previous FALSE_REPORT penalty on the reporter, REVERT it
                     const existingPenalty = await tx.remark.findFirst({
-                        where: {
-                            targetId: remark.reporterId,
-                            category: 'FRAUD',
-                            comment: { contains: `(Ref: ${remarkId})` }
-                        }
+                        where: { targetId: remark.reporterId, category: 'FRAUD', comment: { contains: `(Ref: ${remarkId})` } }
                     });
 
                     if (existingPenalty) {
-                        await tx.user.update({
-                            where: { id: remark.reporterId },
-                            data: { remarkScore: { decrement: existingPenalty.weight } }
-                        });
+                        await tx.user.update({ where: { id: remark.reporterId }, data: { remarkScore: { decrement: existingPenalty.weight } } });
                         await tx.remark.delete({ where: { id: existingPenalty.id } });
                     }
                 }
 
-                updatedRemark = await tx.remark.update({
+                result = await tx.remark.update({
                     where: { id: remarkId },
-                    data: { 
-                        isVerified: true,
-                        appealStatus: remark.appealText ? 'REJECTED' : null
-                    }
+                    data: { isVerified: true, appealStatus: remark.appealText ? 'REJECTED' : null }
                 });
             } else if (action === 'FALSE_REPORT' || action === 'DISMISS') {
-                // If it WAS verified before, we need to RESTORE the score (decrement)
                 if (remark.isVerified) {
                     if (remark.targetRole === 'CUSTOMER') {
-                        await tx.user.update({
-                            where: { id: remark.targetId },
-                            data: { remarkScore: { decrement: remark.weight } }
-                        });
+                        await tx.user.update({ where: { id: remark.targetId }, data: { remarkScore: { decrement: remark.weight } } });
                     } else {
-                        await tx.shop.update({
-                            where: { id: remark.targetId },
-                            data: { remarkScore: { decrement: remark.weight } }
-                        });
+                        await tx.shop.update({ where: { id: remark.targetId }, data: { remarkScore: { decrement: remark.weight } } });
                     }
                 }
 
-                // FALSE_REPORT penalizes the reporter for lying.
-                // DISMISS just closes the report without penalty to anyone (Universal Dismiss).
                 if (action === 'FALSE_REPORT') {
-                    // Penalize the REPORTER for lying (only if not already penalized)
                     const existingPenalty = await tx.remark.findFirst({
-                        where: {
-                            targetId: remark.reporterId,
-                            category: 'FRAUD',
-                            comment: { contains: `(Ref: ${remarkId})` }
-                        }
+                        where: { targetId: remark.reporterId, category: 'FRAUD', comment: { contains: `(Ref: ${remarkId})` } }
                     });
 
                     if (!existingPenalty) {
                         const penaltySetting = await tx.globalSettings.findUnique({ where: { key: 'REMARK_FALSE_REPORT_PENALTY' } });
                         const penaltyWeight = penaltySetting ? parseInt(penaltySetting.value) : 3;
-                        
+
                         await tx.remark.create({
                             data: {
                                 reporterId: moderatorId,
@@ -341,113 +320,83 @@ class RemarkService {
                             }
                         });
 
-                        await tx.user.update({
-                            where: { id: remark.reporterId },
-                            data: { remarkScore: { increment: penaltyWeight } }
-                        });
+                        await tx.user.update({ where: { id: remark.reporterId }, data: { remarkScore: { increment: penaltyWeight } } });
                     }
                 }
 
-                // Update original remark to NOT verified
-                updatedRemark = await tx.remark.update({ 
+                result = await tx.remark.update({
                     where: { id: remarkId },
-                    data: { 
-                        isVerified: false,
-                        appealStatus: action === 'FALSE_REPORT' ? 'ACCEPTED' : 'DISMISSED' 
-                    }
+                    data: { isVerified: false, appealStatus: action === 'FALSE_REPORT' ? 'ACCEPTED' : 'DISMISSED' }
                 });
             }
 
-            // 4. Notify both parties
-            try {
-                // Fetch parties details
-                const reporter = await tx.user.findUnique({ where: { id: remark.reporterId }, select: { id: true, email: true, fullName: true } });
-                
-                let targetUser;
-                if (remark.targetRole === 'CUSTOMER') {
-                    targetUser = await tx.user.findUnique({ where: { id: remark.targetId }, select: { id: true, email: true, fullName: true } });
-                } else {
-                    const shop = await tx.shop.findUnique({ 
-                        where: { id: remark.targetId }, 
-                        include: { providerProfile: { include: { user: { select: { id: true, email: true, fullName: true } } } } } 
-                    });
-                    targetUser = shop?.providerProfile?.user;
-                }
+            return result;
+        }, { timeout: 15000 });
 
-                const title = action === 'VERIFY' ? '🛡️ Moderation Verdict' : '✅ Report Dismissed';
-                
-                // Notify Target
-                const targetBody = action === 'VERIFY' 
-                    ? `Penalty Applied: Trust score -${remark.weight} (Rating -${(remark.weight * 0.1).toFixed(1)} / Distance +${remark.weight}km). Appeal within 24hrs!`
-                    : 'A report against you was dismissed. Your trust score and ranking have been restored!';
-                
-                await sendPushToUser(targetUser.id, { title, body: targetBody }, { type: 'MODERATION_DECISION', remarkId, targetContext: remark.targetRole.toLowerCase() });
-                
-                if (targetUser.email) {
-                    const appLink = `https://${env.DEEP_LINK_DOMAIN}/trust-safety`;
-                    await sendEmail(targetUser.email, title, `
-                        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 30px; border: 1px solid #e0e0e0; border-radius: 16px; background-color: #ffffff;">
-                            <div style="text-align: center; margin-bottom: 20px;">
-                                <h1 style="color: ${action === 'VERIFY' ? '#F43F5E' : '#4F8F6A'}; margin: 0; font-size: 24px;">🛡️ Moderation Verdict</h1>
-                            </div>
-                            
-                            <p style="color: #333; font-size: 16px;">Hello ${targetUser.fullName || 'User'},</p>
-                            <p style="color: #555; line-height: 1.6;">${targetBody}</p>
+        // 2. Async Notifications (Outside Transaction)
+        this._notifyModerationVerdict(updatedRemark, action).catch(err => {
+            console.error('[RemarkService] Async moderation notification failed:', err.message);
+        });
 
-                            <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 4px solid #4F8F6A;">
-                                <h4 style="margin-top: 0; color: #4F8F6A;">Ranking Impact Explained</h4>
-                                <p style="font-size: 14px; color: #666; margin-bottom: 0;">
-                                    Your trust score directly impacts how customers find you:
-                                    <br/>• Rating Impact: <b>-0.1 per point</b>
-                                    <br/>• Distance Impact: <b>+1 km per point</b>
-                                </p>
-                            </div>
+        return updatedRemark;
+    }
 
-                            ${action === 'VERIFY' ? `
-                            <div style="text-align: center; margin: 30px 0;">
-                                <p style="color: #F43F5E; font-weight: bold; font-size: 14px; margin-bottom: 15px;">⚠️ You have 24 hours to contest this decision.</p>
-                                <a href="${appLink}" style="background-color: #F43F5E; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
-                                    APPEAL NOW
-                                </a>
-                            </div>
-                            ` : `
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="${appLink}" style="background-color: #4F8F6A; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
-                                    View Trust Dashboard
-                                </a>
-                            </div>
-                            `}
-                            
-                            <p style="font-size: 12px; color: #aaa; text-align: center; margin-top: 30px;">
-                                Clicking the buttons will open the Vyapaar Connect app directly to your moderation details.
-                            </p>
-                        </div>
-                    `);
-                }
+    async _notifyModerationVerdict(remark, action) {
+        try {
+            const title = action === 'VERIFY' ? '🛡️ Moderation Verdict' : '✅ Report Dismissed';
+            const targetBody = action === 'VERIFY'
+                ? `Penalty Applied: Trust score -${remark.weight} (Rating -${(remark.weight * 0.1).toFixed(1)} / Distance +${remark.weight}km). Appeal within 24hrs!`
+                : 'A report against you was dismissed. Your trust score and ranking have been restored!';
 
-                // Notify Reporter
-                const reporterBody = action === 'VERIFY' 
-                    ? 'Your report has been verified. Thank you for helping keep Vyapaar Connect safe.'
-                    : 'Your report was found to be inaccurate. Please ensure reports are truthful to avoid penalties.';
-                
-                await sendPushToUser(reporter.id, { title: '⚖️ Report Outcome', body: reporterBody }, { type: 'MODERATION_DECISION', remarkId });
+            // Fetch parties details
+            const reporter = await prisma.user.findUnique({ where: { id: remark.reporterId }, select: { id: true, email: true, fullName: true } });
 
-                if (reporter.email) {
-                    await sendEmail(reporter.email, 'Report Resolution Update', `
-                        <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-                            <h2 style="color: #4F8F6A;">Report Outcome</h2>
-                            <p>Hello ${reporter.fullName || 'User'},</p>
-                            <p>${reporterBody}</p>
-                            <p>We appreciate your commitment to the community.</p>
-                        </div>
-                    `);
-                }
-            } catch (err) {
-                console.error('[RemarkService] Final verdict notification failed:', err.message);
+            let targetUser;
+            if (remark.targetRole === 'CUSTOMER') {
+                targetUser = await prisma.user.findUnique({ where: { id: remark.targetId }, select: { id: true, email: true, fullName: true } });
+            } else {
+                const shop = await prisma.shop.findUnique({
+                    where: { id: remark.targetId },
+                    include: { providerProfile: { include: { user: { select: { id: true, email: true, fullName: true } } } } }
+                });
+                targetUser = shop?.providerProfile?.user;
             }
 
-            return updatedRemark;
-        });
+            if (!targetUser) return;
+
+            // Notify Target
+            await sendPushToUser(targetUser.id, { title, body: targetBody }, { type: 'MODERATION_DECISION', remarkId: remark.id, targetContext: remark.targetRole.toLowerCase() });
+
+            if (targetUser.email) {
+                await sendEmail(targetUser.email, title, `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px;">
+                        <h2>${title}</h2>
+                        <p>Hello ${targetUser.fullName || 'User'},</p>
+                        <p>${targetBody}</p>
+                        <hr/>
+                        <p style="font-size: 12px; color: #888;">Vyapaar Connect Moderation Hub</p>
+                    </div>
+                `).catch(e => console.warn('[RemarkService] Target verdict email failed:', e.message));
+            }
+
+            // Notify Reporter
+            const reporterBody = action === 'VERIFY'
+                ? 'Your report has been verified. Thank you for helping keep the marketplace safe.'
+                : 'Your report was found to be inaccurate. Please ensure reports are truthful to avoid penalties.';
+
+            await sendPushToUser(reporter.id, { title: '⚖️ Report Outcome', body: reporterBody }, { type: 'MODERATION_DECISION', remarkId: remark.id });
+
+            if (reporter.email) {
+                await sendEmail(reporter.email, 'Report Resolution Update', `
+                    <div style="font-family: sans-serif; padding: 20px;">
+                        <h2>Report Outcome</h2>
+                        <p>${reporterBody}</p>
+                    </div>
+                `).catch(e => console.warn('[RemarkService] Reporter verdict email failed:', e.message));
+            }
+        } catch (err) {
+            console.error('[RemarkService] Async task logic failed:', err.message);
+        }
     }
 
     /**
@@ -476,7 +425,7 @@ class RemarkService {
 
         console.log(`🛡️ [RemarkService] Fetching remarks for user ${userId}. Targets:`, targetIds);
 
-        const where = { 
+        const where = {
             targetId: { in: targetIds },
             NOT: {
                 appealStatus: { in: ['DISMISSED', 'ACCEPTED'] }

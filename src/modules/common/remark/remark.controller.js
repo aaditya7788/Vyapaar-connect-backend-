@@ -58,7 +58,9 @@ const reportTarget = async (req, res) => {
 const getTargetRemarks = async (req, res) => {
     try {
         const { targetId } = req.params;
-        const remarks = await remarkService.getRemarksForTarget(targetId);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const remarks = await remarkService.getRemarksForTarget(targetId, page, limit);
 
         res.status(200).json({
             status: 'success',
