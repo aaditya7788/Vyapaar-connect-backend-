@@ -2,6 +2,10 @@ const prisma = require('../../../db');
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const path = require('path');
+const axios = require('axios');
+const env = require('../../../config/env');
+
+const APP_LOGO_S3_URL = `${env.AWS.S3_BASE_URL}/uploads/branding/icon.png`.replace(/\/+/g, '/').replace('https:/', 'https://');
 
 /**
  * Generate Activity Report for a Provider Shop
@@ -94,6 +98,15 @@ async function generateExcel(shop, bookings, stats, start, end) {
  * Helper: Generate PDF File with Premium Design
  */
 async function generatePDF(shop, bookings, stats, start, end) {
+    // Fetch Logo Buffer from S3
+    let logoBuffer = null;
+    try {
+        const response = await axios.get(APP_LOGO_S3_URL, { responseType: 'arraybuffer' });
+        logoBuffer = Buffer.from(response.data);
+    } catch (error) {
+        console.error('[REPORTS] Failed to fetch logo from S3, falling back to local if possible:', error.message);
+    }
+
     return new Promise((resolve, reject) => {
         try {
             const doc = new PDFDocument({ 
@@ -136,15 +149,34 @@ async function generatePDF(shop, bookings, stats, start, end) {
                 bg: '#F9F9F9'
             };
 
-            // --- HEADER ---
-            console.log('[REPORTS] Building Header...');
-            doc.rect(0, 0, 595, 100).fill(colors.primary);
-            doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(24).text('VYAPAAR CONNECT', 40, 30, { characterSpacing: 2 });
-            doc.font('Inter-Regular').fontSize(10).text('OFFICIAL BUSINESS REPORT', 40, 60);
-            
-            doc.fillColor('#FFFFFF').fontSize(12).text(String(shop.name || 'Your Shop').toUpperCase(), 400, 35, { align: 'right' });
-            doc.fontSize(10).text(`Generated: ${new Date().toLocaleDateString()}`, 400, 55, { align: 'right' });
-            doc.text(`Period: ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`, 400, 70, { align: 'right' });
+            // --- HEADER HELPER ---
+            const drawHeader = (isFirstPage = false) => {
+                doc.rect(0, 0, 595, 100).fill(colors.primary);
+                
+                // Add Logo
+                try {
+                    if (logoBuffer) {
+                        doc.image(logoBuffer, 40, 28, { width: 35 });
+                    } else {
+                        // Minimal fallback if logo fails
+                        const fallbackPath = path.join(__dirname, '../../../../../assets/icon.png');
+                        doc.image(fallbackPath, 40, 28, { width: 35 });
+                    }
+                } catch (err) {
+                    console.error('[REPORTS] Logo image fallback also failed:', err.message);
+                }
+
+                doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(24).text('VYAPAAR CONNECT', 85, 30, { characterSpacing: 2 });
+                doc.font('Inter-Regular').fontSize(10).text('OFFICIAL BUSINESS REPORT', 85, 60);
+                
+                doc.fillColor('#FFFFFF').fontSize(12).text(String(shop.name || 'Your Shop').toUpperCase(), 400, 35, { align: 'right' });
+                doc.fontSize(10).text(`Generated: ${new Date().toLocaleString('en-IN')}`, 400, 55, { align: 'right' });
+                doc.text(`Period: ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`, 400, 70, { align: 'right' });
+            };
+
+            // --- FIRST PAGE HEADER ---
+            console.log('[REPORTS] Building First Page Header...');
+            drawHeader(true);
 
             doc.moveDown(4);
 
@@ -226,9 +258,11 @@ async function generatePDF(shop, bookings, stats, start, end) {
             bookings.slice(0, 50).forEach(b => {
                 if (logY > 750) {
                     doc.addPage();
-                    logY = 50;
+                    drawHeader();
+                    logY = 120; // Start below the 100px header
                     doc.rect(40, logY, 520, 20).fill(colors.primary);
-                    doc.fillColor('#FFFFFF').text('DATE', 50, logY + 7);
+                    doc.fillColor('#FFFFFF').font('Inter-Bold').fontSize(8);
+                    doc.text('DATE', 50, logY + 7);
                     doc.text('CUSTOMER', 110, logY + 7);
                     doc.text('SERVICES', 220, logY + 7);
                     doc.text('STATUS', 400, logY + 7);

@@ -453,25 +453,43 @@ class RemarkService {
     /**
      * Get remarks targeting a specific user (for their history/appeal screen)
      */
-    async getRemarksForUser(userId) {
+    async getRemarksForUser(userId, page = 1, limit = 10) {
+        const skip = (page - 1) * limit;
+
         // Check if user is a provider and get ALL their shops
         const shops = await prisma.shop.findMany({
             where: { providerProfile: { userId } },
-            select: { id: true }
+            select: { id: true, name: true, remarkScore: true }
         });
+
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { remarkScore: true, fullName: true }
+        });
+
+        const targetScores = [
+            { id: userId, name: 'Personal Profile', score: user?.remarkScore || 0, isPersonal: true },
+            ...shops.map(s => ({ id: s.id, name: s.name, score: s.remarkScore || 0, isPersonal: false }))
+        ];
 
         const targetIds = [userId, ...shops.map(s => s.id)];
 
         console.log(`🛡️ [RemarkService] Fetching remarks for user ${userId}. Targets:`, targetIds);
 
+        const where = { 
+            targetId: { in: targetIds },
+            NOT: {
+                appealStatus: { in: ['DISMISSED', 'ACCEPTED'] }
+            }
+        };
+
+        const total = await prisma.remark.count({ where });
+
         const remarks = await prisma.remark.findMany({
-            where: { 
-                targetId: { in: targetIds },
-                NOT: {
-                    appealStatus: { in: ['DISMISSED', 'ACCEPTED'] }
-                }
-            },
-            orderBy: { createdAt: 'desc' }
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit
         });
 
         // Enrich remarks with shop names if possible
@@ -486,19 +504,34 @@ class RemarkService {
             return r;
         }));
 
-        return enrichedRemarks;
+        return {
+            items: enrichedRemarks,
+            scores: targetScores,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        };
     }
 
     /**
      * Get ALL remarks for the Admin Moderation Hub
      */
-    async getAllRemarks() {
+    async getAllRemarks(page = 1, limit = 20) {
+        const skip = (page - 1) * limit;
+
+        const total = await prisma.remark.count();
+
         const remarks = await prisma.remark.findMany({
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit
         });
 
         // Enrich with Names and Booking Details
-        return await Promise.all(remarks.map(async (r) => {
+        const items = await Promise.all(remarks.map(async (r) => {
             let targetName = 'Unknown';
             let targetScore = 0;
 
@@ -532,6 +565,16 @@ class RemarkService {
 
             return { ...r, targetName, targetScore, reporter, booking };
         }));
+
+        return {
+            items: items,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        };
     }
 }
 

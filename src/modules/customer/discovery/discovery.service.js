@@ -1,4 +1,5 @@
 const prisma = require('../../../db');
+const slotService = require('../../provider/slots/slot.service');
 
 /**
  * Get Home Feed Data
@@ -103,7 +104,7 @@ const getHomeFeed = async () => {
  * Filters by query, category name, and community slug
  */
 const searchDiscovery = async (filters, userId = null) => {
-    const { q, category, community, page = 1, limit = 10, sortBy, lat, lng } = filters;
+    const { q, category, community, page = 1, limit = 10, sortBy, lat, lng, date } = filters;
 
     // Log search query for analytics
     if (q) {
@@ -222,6 +223,43 @@ const searchDiscovery = async (filters, userId = null) => {
             is_inclusion: isModular
         };
     });
+
+    // --- Availability Filtering ---
+    if (date) {
+        const availabilityCache = new Map();
+
+        const checkAvailability = async (item) => {
+            const shopId = item.type === 'SHOP' ? item.id : (item.shopId || item.shop?.id);
+            if (!shopId) return true;
+
+            // Use cache to avoid redundant DB/Logic hits for multiple services of same shop
+            if (availabilityCache.has(shopId)) return availabilityCache.get(shopId);
+
+            try {
+                const availability = await slotService.getAvailableSlots(shopId, date);
+                
+                // Logic: A provider is "Available" only if:
+                // 1. They are NOT closed by weekly schedule
+                // 2. They are NOT on a specific date holiday
+                // 3. They have AT LEAST one slot with status 'available'
+                const isAvailable = 
+                    !availability.isClosed && 
+                    !availability.isHoliday && 
+                    availability.slots.length > 0 && 
+                    availability.slots.some(s => s.status === 'available');
+
+                availabilityCache.set(shopId, isAvailable);
+                return isAvailable;
+            } catch (error) {
+                console.error(`[Search Availability Error] Shop ${shopId}:`, error);
+                availabilityCache.set(shopId, true); // Fallback to show on error
+                return true; 
+            }
+        };
+
+        const availabilityResults = await Promise.all(mixed.map(item => checkAvailability(item)));
+        mixed = mixed.filter((_, index) => availabilityResults[index]);
+    }
 
     if (lat && lng) {
         const latFloat = parseFloat(lat);

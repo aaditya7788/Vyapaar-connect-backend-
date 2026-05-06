@@ -53,23 +53,39 @@ const verifyFirebaseToken = async (firebaseToken) => {
 /**
  * Notify all other devices to logout immediately (Socket + FCM)
  */
-const notifyOtherDevicesOfLogout = async (userId) => {
+/**
+ * Notify specific or other devices to logout immediately (Socket + FCM)
+ * @param {string} userId
+ * @param {string} excludeSessionId - ID of session to NOT logout
+ * @param {string} targetSessionId - ID of session to specifically logout
+ */
+const notifyOtherDevicesOfLogout = async (userId, excludeSessionId = null, targetSessionId = null) => {
     try {
-        // 1. Instant Socket Emit (if online)
+        // 1. Instant Socket Emit
         try {
             const io = getIO();
             io.to(`user_${userId}`).emit('SESSION_EXPIRED', { 
-                message: 'You have been logged out from another device' 
+                message: targetSessionId ? 'This device has been logged out' : 'You have been logged out from another device',
+                excludeSessionId,
+                targetSessionId
             });
-            console.log(`[AUTH] Socket Logout Emit sent to user_${userId}`);
+            console.log(`[AUTH] Socket Logout Emit sent to user_${userId} (Exclude: ${excludeSessionId}, Target: ${targetSessionId})`);
         } catch (sErr) {
             // Silently skip if socket not init or user not connected
         }
 
-        // 2. Silent FCM Push (if backgrounded)
+        // 2. Silent FCM Push
         try {
             const messaging = getMessaging();
             if (messaging) {
+                const where = { userId };
+                if (excludeSessionId) {
+                    // Find the token for the excluded session to omit it
+                    const excluded = await prisma.refreshToken.findUnique({ where: { id: excludeSessionId }, select: { token: true } });
+                    // Since push tokens are linked to sessions/tokens, we try to filter
+                    // Note: This is a best-effort as push tokens might not be perfectly mapped to specific sessions in all cases
+                }
+
                 const tokens = await prisma.pushToken.findMany({
                     where: { userId },
                     select: { token: true }
@@ -81,6 +97,8 @@ const notifyOtherDevicesOfLogout = async (userId) => {
                         tokens: deviceTokens,
                         data: {
                             type: 'SESSION_EXPIRED',
+                            excludeSessionId: excludeSessionId || '',
+                            targetSessionId: targetSessionId || '',
                         }
                     });
                     console.log(`[AUTH] FCM Logout Push sent to ${deviceTokens.length} tokens`);
@@ -242,6 +260,7 @@ const verifyPhoneOtp = async (phone, otp, becomeProvider = false, metadata = {},
     message: 'Login successful',
     accessToken,
     refreshToken,
+    sessionId,
     user: {
       id: user.id,
       phone: user.phone,
@@ -489,6 +508,7 @@ const verifyEmailOtp = async (email, otp, metadata = {}, forceLogout = false) =>
     message: 'Verification successful',
     accessToken,
     refreshToken,
+    sessionId,
     user: {
       id: user.id,
       phone: user.phone.startsWith('email_') ? null : user.phone,
@@ -576,6 +596,7 @@ const googleSignin = async (googlePayload, metadata = {}, forceLogout = false) =
     message: 'Google login successful',
     accessToken,
     refreshToken,
+    sessionId,
     user: {
       id: user.id,
       phone: user.phone.startsWith('google_') || user.phone.startsWith('email_') ? null : user.phone,
@@ -624,6 +645,11 @@ const listSessions = async (userId, currentToken) => {
  * Logout from all other devices
  */
 const logoutAllOtherDevices = async (userId, currentToken) => {
+  // Find current session ID first
+  const currentSession = await prisma.refreshToken.findFirst({
+    where: { token: currentToken }
+  });
+
   await prisma.refreshToken.deleteMany({
     where: {
       userId,
@@ -631,8 +657,8 @@ const logoutAllOtherDevices = async (userId, currentToken) => {
     }
   });
 
-  // Notify other devices to logout instantly
-  await notifyOtherDevicesOfLogout(userId);
+  // Notify other devices to logout instantly (Exclude current session)
+  await notifyOtherDevicesOfLogout(userId, currentSession?.id);
 
   return { message: 'Signed out from all other devices' };
 };
@@ -645,8 +671,8 @@ const logoutSpecificDevice = async (userId, sessionId) => {
     where: { id: sessionId, userId }
   });
 
-  // Trigger cross-device signal
-  await notifyOtherDevicesOfLogout(userId);
+  // Trigger targeted logout signal for ONLY that specific device
+  await notifyOtherDevicesOfLogout(userId, null, sessionId);
 
   return { message: 'Device logged out' };
 };

@@ -29,12 +29,37 @@ const createAddress = async (req, res) => {
     try {
         const { label, name, icon, address, area, landmark, latitude, longitude, isDefault } = req.body;
 
+        // 🚀 UPSERT LOGIC: If an address with this label already exists, update it instead of creating a duplicate
+        const existingAddress = await prisma.userAddress.findFirst({
+            where: { 
+                userId: req.user.id,
+                label: label 
+            }
+        });
+
         // If this is set as default, unset others first
         if (isDefault) {
             await prisma.userAddress.updateMany({
                 where: { userId: req.user.id },
                 data: { isDefault: false }
             });
+        }
+
+        if (existingAddress) {
+            const updated = await prisma.userAddress.update({
+                where: { id: existingAddress.id },
+                data: {
+                    name,
+                    icon: icon || 'home',
+                    address,
+                    area,
+                    landmark,
+                    latitude: latitude ? parseFloat(latitude) : null,
+                    longitude: longitude ? parseFloat(longitude) : null,
+                    isDefault: isDefault || false
+                }
+            });
+            return res.status(200).json({ status: 'success', data: updated, message: 'Address updated' });
         }
 
         const newAddress = await prisma.userAddress.create({

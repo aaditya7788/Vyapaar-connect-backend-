@@ -204,16 +204,25 @@ const sendReportEmail = async (email, subject, buffer, filename) => {
   }
 
   try {
+    const iconUrl = `${env.AWS.S3_BASE_URL}/uploads/branding/icon.png`.replace(/\/+/g, '/').replace('https:/', 'https://');
     const mailOptions = {
       from: env.SMTP.FROM,
       to: email,
       subject: subject,
       html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2>Your Activity Report is Ready</h2>
-                    <p>Please find your requested activity report attached to this email.</p>
-                    <br/>
-                    <p>Regards,<br/>Vyapaar Connect Team</p>
+                <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 12px; max-width: 600px;">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <img src="${iconUrl}" alt="Vyapaar Connect" style="width: 60px; height: 60px;" />
+                    </div>
+                    <h2 style="color: #2E7D32; text-align: center;">Your Activity Report is Ready</h2>
+                    <p style="color: #444; line-height: 1.6;">Hello,</p>
+                    <p style="color: #444; line-height: 1.6;">Please find your requested business activity report attached to this email. This report contains your recent bookings, revenue analysis, and service insights.</p>
+                    <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center;">
+                         <p style="margin: 0; font-weight: bold; color: #666;">File: ${filename}</p>
+                    </div>
+                    <p style="color: #444; line-height: 1.6;">Regards,<br/><b>Vyapaar Connect Team</b></p>
+                    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                    <p style="font-size: 11px; color: #aaa; text-align: center;">&copy; ${new Date().getFullYear()} OnePointSolution. All rights reserved.</p>
                 </div>
             `,
       attachments: [

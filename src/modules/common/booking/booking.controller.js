@@ -95,10 +95,10 @@ class BookingController {
     async updateStatus(req, res) {
         try {
             const { id } = req.params;
-            const { status, completionOtp } = req.body;
+            const { status, completionOtp, reason } = req.body;
             const userId = req.user.id;
-
-            const updatedBooking = await bookingService.updateStatus(id, userId, status, completionOtp);
+    
+            const updatedBooking = await bookingService.updateStatus(id, userId, status, completionOtp, reason);
             res.status(200).json({ status: 'success', data: updatedBooking });
         } catch (error) {
             console.error('Booking status update error:', error);

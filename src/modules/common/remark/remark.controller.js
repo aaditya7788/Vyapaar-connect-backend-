@@ -99,7 +99,9 @@ const moderateRemark = async (req, res) => {
 const getMyRemarks = async (req, res) => {
     try {
         const userId = req.user.id;
-        const remarks = await remarkService.getRemarksForUser(userId);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const remarks = await remarkService.getRemarksForUser(userId, page, limit);
 
         res.status(200).json({
             status: 'success',
@@ -139,7 +141,9 @@ const appealRemark = async (req, res) => {
  */
 const getAllRemarks = async (req, res) => {
     try {
-        const remarks = await remarkService.getAllRemarks();
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const remarks = await remarkService.getAllRemarks(page, limit);
         res.status(200).json({ status: 'success', data: remarks });
     } catch (error) {
         console.error('[GET ALL REMARKS ERROR]:', error);

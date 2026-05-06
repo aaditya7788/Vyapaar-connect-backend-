@@ -303,6 +303,7 @@ model Booking {
   creditFeePaid      Boolean             @default(false)
   creditFeeAmount    Int                 @default(0)
   isCallUnlocked     Boolean             @default(false)
+  declineReason      String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   address            UserAddress?        @relation(fields: [addressId], references: [id], onDelete: SetNull)

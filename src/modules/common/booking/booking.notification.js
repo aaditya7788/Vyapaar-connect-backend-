@@ -348,8 +348,86 @@ const sendPushToCategory = async (category, { title, body }, data = {}) => {
         console.error('[Push Broadcast] Error:', error.message);
     }
 };
+ 
+/**
+ * Centralized Notification Content Map
+ * Perspectives: CUSTOMER and PROVIDER
+ */
+const BOOKING_NOTIFICATION_MAP = {
+    CONFIRMED: {
+        customer: {
+            title: 'Accepted! ✅',
+            body: (data) => `Great news! ${data.providerName} is confirmed for ${data.serviceName} at ${data.time}.`
+        },
+        provider: {
+            title: 'Success 🎉',
+            body: (data) => `Job confirmed with ${data.customerName}. Don't forget to arrive on time!`
+        }
+    },
+    ARRIVED: {
+        customer: {
+            title: 'Arrived! 📍',
+            body: (data) => `${data.providerName} is at your doorstep for ${data.serviceName}. Please greet them!`
+        },
+        provider: {
+            title: 'Check-in 📍',
+            body: (data) => `Location logged. Ask ${data.customerName} for the service start OTP.`
+        }
+    },
+    IN_PROGRESS: {
+        customer: {
+            title: 'Started 🚀',
+            body: (data) => `Your ${data.serviceName} is now in progress. Sit back and relax!`
+        },
+        provider: {
+            title: 'In Progress 🛠️',
+            body: (data) => `Good luck with ${data.customerName}'s job! Remember to maintain quality.`
+        }
+    },
+    COMPLETED: {
+        customer: {
+            title: 'Done! ✨',
+            body: (data) => `Service complete! Hope you enjoyed your ${data.serviceName}. Please rate ${data.providerName}!`
+        },
+        provider: {
+            title: 'Great Job! 💰',
+            body: (data) => `You've completed the service for ${data.customerName}. Payment will be processed.`
+        }
+    },
+    CANCELLED: {
+        customer: {
+            title: 'Cancelled ❌',
+            body: (data) => `Your booking for ${data.serviceName} has been cancelled.`
+        },
+        provider: {
+            title: 'Cancelled ❌',
+            body: (data) => `The request from ${data.customerName} for ${data.serviceName} was withdrawn.`
+        }
+    },
+    DECLINED: {
+        customer: {
+            title: 'Declined 🚫',
+            body: (data) => `Sorry, the professional couldn't take your request for ${data.serviceName} right now. ${data.reason ? `Reason: ${data.reason}` : ''}`
+        },
+        provider: {
+            title: 'Declined 🚫',
+            body: (data) => `You've declined the request from ${data.customerName} for ${data.serviceName}.`
+        }
+    },
+    EXPIRED: {
+        customer: {
+            title: 'Expired ⏳',
+            body: (data) => `We couldn't find a provider for your ${data.serviceName} in time. Would you like to try again?`
+        },
+        provider: {
+            title: 'Expired ⏳',
+            body: (data) => `The booking request from ${data.customerName} for ${data.serviceName} has expired.`
+        }
+    }
+};
 
 module.exports = {
+    BOOKING_NOTIFICATION_MAP,
     sendPushToUser,
     sendPushToCategory,
     sendChatPush: async (userId, senderName, content, data) => {

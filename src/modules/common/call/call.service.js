@@ -94,7 +94,8 @@ class CallService {
                 callerName: caller.fullName || 'Service Provider',
                 channelName,
                 token,
-                agoraAppId: process.env.AGORA_APP_ID
+                agoraAppId: process.env.AGORA_APP_ID,
+                skipHistory: true
             }, 'booking-alerts');
         } catch (fcmError) {
             console.error('📞 [CallService] Signaling failed:', fcmError.message);
@@ -169,26 +170,22 @@ class CallService {
             throw new Error(`Insufficient credits. ${unlockFee} coins required for early unlock.`);
         }
 
+        const WalletService = require('../wallet/wallet.service');
+
         // 3. Execute Transaction
         return await prisma.$transaction(async (tx) => {
-            // Deduct credits
-            await tx.userCredits.update({
-                where: { userId },
-                data: { balance: { decrement: unlockFee } }
-            });
-
-            // Log debit transaction
-            await tx.creditTransaction.create({
-                data: {
-                    userId,
-                    amount: unlockFee,
-                    type: 'DEBIT',
-                    description: `Early call unlock for Booking #${booking.displayId || booking.id.substring(0,8)}`,
+            // Deduct credits using central service (Ensures consistency and correct ledger amount)
+            await WalletService.deductCredits(
+                userId, 
+                unlockFee, 
+                'USED', 
+                `Early call unlock for Booking #${booking.displayId || booking.id.substring(0,8)}`,
+                { 
                     bookingId: booking.id,
-                    status: 'SUCCESS',
                     metadata: { action: 'CALL_EARLY_UNLOCK', coins: unlockFee }
-                }
-            });
+                },
+                tx
+            );
 
             // Update booking status
             const updatedBooking = await tx.booking.update({
@@ -201,15 +198,28 @@ class CallService {
                 const { getIO } = require('../../../utils/socket');
                 const io = getIO();
                 
-                // Notify both customer and provider rooms
-                const targetRooms = [`user_${updatedBooking.userId}`, `user_${userId}`];
-                targetRooms.forEach(room => {
-                    io.to(room).emit('booking_updated', {
-                        bookingId: updatedBooking.id,
-                        status: updatedBooking.status,
-                        isCallUnlocked: true
-                    });
+                // Notify Customer
+                io.to(`user_${updatedBooking.userId}`).emit('booking_updated', {
+                    bookingId: updatedBooking.id,
+                    status: updatedBooking.status,
+                    isCallUnlocked: true,
+                    targetContext: 'customer',
+                    profileKey: 'CUSTOMER_UPDATE',
+                    title: '📞 Call Feature Unlocked!',
+                    body: 'Your professional has enabled early calling for your appointment.'
                 });
+
+                // Notify Provider (Sync across devices)
+                io.to(`user_${userId}`).emit('booking_updated', {
+                    bookingId: updatedBooking.id,
+                    status: updatedBooking.status,
+                    isCallUnlocked: true,
+                    targetContext: 'provider',
+                    profileKey: 'CUSTOMER_UPDATE',
+                    title: '✅ Call Unlocked Successfully',
+                    body: 'You can now call the customer early.'
+                });
+                
                 console.log(`📡 [CallService] Call unlock synced via socket for booking: ${bookingId}`);
             } catch (socketError) {
                 console.error('📡 [CallService] Socket sync failed:', socketError.message);

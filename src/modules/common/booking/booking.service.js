@@ -1,7 +1,7 @@
 const prisma = require('../../../db');
 const walletService = require('../wallet/wallet.service');
 const { getIO } = require('../../../utils/socket');
-const { sendPushToUser } = require('./booking.notification');
+const { sendPushToUser, BOOKING_NOTIFICATION_MAP } = require('./booking.notification');
 const { haversineDistance } = require('../../../utils/geo');
 
 /**
@@ -973,7 +973,7 @@ class BookingService {
      * Update booking status (called by Customer OR Provider)
      * Refactored: verificationOtp clarifies dual-use (Start vs End)
      */
-    async updateStatus(id, userId, status, verificationOtp = null) {
+    async updateStatus(id, userId, status, verificationOtp = null, reason = null) {
         const booking = await prisma.booking.findUnique({
             where: { id },
             include: { shop: { include: { providerProfile: true } } }
@@ -1036,14 +1036,50 @@ class BookingService {
                 }
             }
         } else if (isCustomer) {
-            // CANCELLATION LOCKDOWN: Cannot cancel if accepted (Confirmed or beyond)
-            if (status === 'CANCELLED' && booking.status !== 'PENDING') {
-                throw new Error('This booking is already confirmed and cannot be cancelled. Please contact support.');
+            // CANCELLATION LOCKDOWN Logic
+            if (status === 'CANCELLED') {
+                if (booking.status === 'PENDING') {
+                    // Always allowed for pending
+                } else if (['CONFIRMED', 'ACCEPTED'].includes(booking.status)) {
+                    // Check window (Default 24 hours)
+                    const cancelWindow = await this.getGlobalSetting('CANCEL_WINDOW_HOURS', 24);
+                    
+                    if (cancelWindow > 0) {
+                        const now = new Date();
+                        const scheduledDate = new Date(booking.scheduledDate);
+                        
+                        // Parse scheduledTime (Handles "09:30 AM" or "21:30")
+                        let hours = 0, minutes = 0;
+                        const timeStr = booking.scheduledTime || "00:00 AM";
+                        
+                        if (timeStr.includes(' ')) {
+                            const [time, period] = timeStr.split(' ');
+                            const [h, m] = time.split(':').map(Number);
+                            hours = h;
+                            minutes = m || 0;
+                            if (period === 'PM' && hours < 12) hours += 12;
+                            if (period === 'AM' && hours === 12) hours = 0;
+                        } else {
+                            const [h, m] = timeStr.split(':').map(Number);
+                            hours = h;
+                            minutes = m || 0;
+                        }
+                        
+                        scheduledDate.setHours(hours, minutes, 0, 0);
+                        const diffHours = (scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+                        
+                        if (diffHours < cancelWindow) {
+                            throw new Error(`Cancellation is not possible as your appointment is scheduled within ${cancelWindow} hours.`);
+                        }
+                    }
+                } else {
+                    throw new Error(`This booking is currently ${booking.status.toLowerCase()} and cannot be cancelled.`);
+                }
             }
 
-            // Allow customers to update status (e.g., to RE-PENDING or similar) if it's currently PENDING
+            // Customers cannot perform other state transitions
             if (status !== 'CANCELLED' && booking.status !== 'PENDING') {
-                throw new Error('Customers can only cancel bookings once they are confirmed.');
+                throw new Error('Customers can only cancel bookings or modify pending requests.');
             }
         }
 
@@ -1074,7 +1110,10 @@ class BookingService {
 
             const updatedBooking = await tx.booking.update({
                 where: { id },
-                data: { status },
+                data: { 
+                    status,
+                    ...(status === 'DECLINED' && { declineReason: reason })
+                },
                 include: {
                     user: {
                         select: {
@@ -1094,45 +1133,75 @@ class BookingService {
                 }
             });
 
-            // Notify Customer & Provider
-            this._emit(`user_${booking.userId}`, 'booking_updated', {
-                bookingId: id,
-                status
-            });
-
-            const providerId = booking.shop.providerProfile.userId;
-            this._emit(`user_${providerId}`, 'booking_updated', {
-                bookingId: id,
-                status
-            });
-
-            // Push Notification to Customer
-            const statusMessages = {
-                CONFIRMED: 'Your request has been accepted! 🎉',
-                ARRIVED: 'Provider has arrived at your location. 📍',
-                IN_PROGRESS: 'Service has started. 🚀',
-                COMPLETED: 'Job completed successfully! Thank you for using our service. ✨',
-                CANCELLED: 'Booking has been cancelled.',
-                DECLINED: 'Provider was unavailable and declined your request.',
-                EXPIRED: 'Booking request has expired.'
+            // ── Persist Context for Templates ──
+            const templateData = {
+                customerName: updatedBooking.user?.fullName || 'Customer',
+                providerName: updatedBooking.shop?.name || 'Professional',
+                serviceName: updatedBooking.items?.[0]?.service?.name || 'Service',
+                time: updatedBooking.scheduledTime,
+                reason: reason
             };
 
-            if (statusMessages[status]) {
+            const config = BOOKING_NOTIFICATION_MAP[status];
+
+            // ── Notify Customer (Socket + Push) ──
+            if (config?.customer) {
+                const customerMsg = {
+                    title: typeof config.customer.title === 'function' ? config.customer.title(templateData) : config.customer.title,
+                    body: typeof config.customer.body === 'function' ? config.customer.body(templateData) : config.customer.body
+                };
+
+                this._emit(`user_${booking.userId}`, 'booking_updated', {
+                    bookingId: id,
+                    status,
+                    reason,
+                    targetContext: 'customer',
+                    profileKey: 'CUSTOMER_UPDATE',
+                    ...customerMsg // title and body for Global Alert
+                });
+
                 sendPushToUser(updatedBooking.userId, {
-                    title: `Booking Update: ${status}`,
-                    body: statusMessages[status]
+                    title: customerMsg.title,
+                    body: customerMsg.body
                 }, {
                     type: 'booking_status',
                     bookingId: id,
                     status,
-                    shopId: updatedBooking.shopId,
-                    category: updatedBooking.shop?.category,
-                    serviceName: updatedBooking.items?.[0]?.service?.name || 'Service',
-                    scheduledTime: updatedBooking.scheduledTime,
-                    totalAmount: updatedBooking.totalAmount || 0,
                     targetContext: 'customer',
-                    isDataOnly: true // 🚀 Fix: Prevent duplicates
+                    isDataOnly: true 
                 });
+            }
+
+            // ── Notify Provider (Socket + Push) ──
+            const providerId = booking.shop?.providerProfile?.userId;
+            if (providerId && config?.provider) {
+                const providerMsg = {
+                    title: typeof config.provider.title === 'function' ? config.provider.title(templateData) : config.provider.title,
+                    body: typeof config.provider.body === 'function' ? config.provider.body(templateData) : config.provider.body
+                };
+
+                this._emit(`user_${providerId}`, 'booking_updated', {
+                    bookingId: id,
+                    status,
+                    targetContext: 'provider',
+                    profileKey: 'CUSTOMER_UPDATE', // Chime is fine for updates
+                    ...providerMsg // title and body for Global Alert
+                });
+
+                // Only send push to provider if it's a "takeaway" status (Cancelled, Expired)
+                // Professionals don't need a push when they themselves Accept/Arrive/Complete (it would be annoying)
+                if (['CANCELLED', 'EXPIRED'].includes(status)) {
+                    sendPushToUser(providerId, {
+                        title: providerMsg.title,
+                        body: providerMsg.body
+                    }, {
+                        type: 'booking_status',
+                        bookingId: id,
+                        status,
+                        targetContext: 'provider',
+                        isDataOnly: true
+                    });
+                }
             }
 
             // ── Chat Unlocking Logic (Phase 112.1) ──
@@ -1195,6 +1264,10 @@ class BookingService {
         this._emit(`user_${providerUserId}`, 'new_booking', {
             bookingId: updated.id,
             displayId: updated.displayId,
+            targetContext: 'provider',
+            profileKey: 'PROVIDER_NEW',
+            title: '🔔 NEW REQUEST!',
+            body: `New request received for ${updated.user?.fullName || 'a service'}.`,
             totalAmount: updated.totalAmount,
             userName: updated.user?.fullName || 'Customer',
             userRemarkScore: updated.user?.remarkScore || 0,
