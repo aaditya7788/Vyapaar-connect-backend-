@@ -13,7 +13,7 @@ const incrementShopView = async (shopId) => {
 /**
  * Get detailed analytics for a shop
  */
-const getShopAnalytics = async (shopId) => {
+const getShopAnalytics = async (shopId, startDate, endDate) => {
     const shop = await prisma.shop.findUnique({
         where: { id: shopId },
         include: {
@@ -38,7 +38,7 @@ const getShopAnalytics = async (shopId) => {
 
         const completed = bookings.filter(b => b.status === 'COMPLETED');
         const revenue = completed.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
-        
+
         return {
             bookings: bookings.length,
             completed: completed.length,
@@ -89,7 +89,7 @@ const getShopAnalytics = async (shopId) => {
         d.setHours(0, 0, 0, 0);
         const endD = new Date(d);
         endD.setHours(23, 59, 59, 999);
-        
+
         const stats = await prisma.booking.aggregate({
             where: {
                 shopId,
@@ -113,7 +113,7 @@ const getShopAnalytics = async (shopId) => {
         d.setHours(0, 0, 0, 0);
         const endD = new Date(d);
         endD.setHours(23, 59, 59, 999);
-        
+
         const stats = await prisma.booking.aggregate({
             where: {
                 shopId,
@@ -136,7 +136,7 @@ const getShopAnalytics = async (shopId) => {
         endR.setDate(now.getDate() - (i * 7));
         const startR = new Date(now);
         startR.setDate(now.getDate() - ((i + 1) * 7));
-        
+
         const stats = await prisma.booking.aggregate({
             where: {
                 shopId,
@@ -145,7 +145,7 @@ const getShopAnalytics = async (shopId) => {
             _count: { id: true },
             _sum: { totalAmount: true }
         });
-        thisMonthData.unshift(stats._count.id); 
+        thisMonthData.unshift(stats._count.id);
         thisMonthRevenue.unshift(Number(stats._sum.totalAmount || 0));
     }
     const thisMonthTotal = thisMonthData.reduce((a, b) => a + b, 0);
@@ -157,7 +157,7 @@ const getShopAnalytics = async (shopId) => {
         where: { shopId },
         _count: { id: true }
     });
-    
+
     const repeatCustomersCount = uniqueCustomers.filter(c => c._count.id > 1).length;
     const repeatRate = uniqueCustomers.length > 0 ? (repeatCustomersCount / uniqueCustomers.length) * 100 : 0;
     const avgBookingValue = currentMetrics.completed > 0 ? currentMetrics.revenue / currentMetrics.completed : 0;
@@ -186,7 +186,7 @@ const getShopAnalytics = async (shopId) => {
 
     // 7. Dynamic Alerts & Recommendations
     const alerts = [];
-    
+
     // Low Conversion Alert (Impressions to Leads)
     if (shop.views > 50) {
         const profileConv = (currentMetrics.leads / shop.views) * 100;
@@ -256,19 +256,19 @@ const getShopAnalytics = async (shopId) => {
                 data: thisWeekData,
                 revenueData: thisWeekRevenue,
                 labels: thisWeekLabels.slice(0, thisWeekData.length),
-                summary: { 
-                    current: thisWeekData.reduce((a, b) => a + b, 0), 
+                summary: {
+                    current: thisWeekData.reduce((a, b) => a + b, 0),
                     previous: lastWeekTotal,
                     revenue: { current: thisWeekRevenue.reduce((a, b) => a + b, 0), previous: lastWeekRevenueTotal }
                 },
-                previous: null 
+                previous: null
             },
             lastWeek: {
                 data: lastWeekData,
                 revenueData: lastWeekRevenue,
                 labels: thisWeekLabels,
-                summary: { 
-                    current: lastWeekTotal, 
+                summary: {
+                    current: lastWeekTotal,
                     previous: 0,
                     revenue: { current: lastWeekRevenueTotal, previous: 0 }
                 },
@@ -278,13 +278,95 @@ const getShopAnalytics = async (shopId) => {
                 data: thisMonthData,
                 revenueData: thisMonthRevenue,
                 labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-                summary: { 
-                    current: thisMonthTotal, 
+                summary: {
+                    current: thisMonthTotal,
                     previous: previousMetrics.bookings,
                     revenue: { current: thisMonthRevenueTotal, previous: previousMetrics.revenue }
                 },
                 previous: null
-            }
+            },
+            custom: await (async () => {
+                if (!startDate || !endDate) return null;
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+
+                // Determine granularity
+                const diffTime = Math.abs(end - start);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                const labels = [];
+                const data = [];
+                const revenueData = [];
+
+                if (diffDays <= 14) {
+                    // Daily
+                    for (let i = 0; i <= diffDays; i++) {
+                        const d = new Date(start);
+                        d.setDate(d.getDate() + i);
+                        d.setHours(0, 0, 0, 0);
+                        const endD = new Date(d);
+                        endD.setHours(23, 59, 59, 999);
+
+                        const stats = await prisma.booking.aggregate({
+                            where: { shopId, createdAt: { gte: d, lte: endD } },
+                            _count: { id: true },
+                            _sum: { totalAmount: true }
+                        });
+                        labels.push(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }));
+                        data.push(stats._count.id);
+                        revenueData.push(Number(stats._sum.totalAmount || 0));
+                    }
+                } else if (diffDays <= 60) {
+                    // Weekly
+                    for (let i = 0; i < Math.ceil(diffDays / 7); i++) {
+                        const d = new Date(start);
+                        d.setDate(d.getDate() + (i * 7));
+                        const endD = new Date(d);
+                        endD.setDate(d.getDate() + 6);
+                        if (endD > end) endD.setTime(end.getTime());
+
+                        const stats = await prisma.booking.aggregate({
+                            where: { shopId, createdAt: { gte: d, lte: endD } },
+                            _count: { id: true },
+                            _sum: { totalAmount: true }
+                        });
+                        labels.push(`W${i + 1}`);
+                        data.push(stats._count.id);
+                        revenueData.push(Number(stats._sum.totalAmount || 0));
+                    }
+                } else {
+                    // Monthly
+                    let current = new Date(start);
+                    current.setDate(1);
+                    while (current <= end) {
+                        const d = new Date(current);
+                        const endD = new Date(current.getFullYear(), current.getMonth() + 1, 0);
+                        if (endD > end) endD.setTime(end.getTime());
+
+                        const stats = await prisma.booking.aggregate({
+                            where: { shopId, createdAt: { gte: d, lte: endD } },
+                            _count: { id: true },
+                            _sum: { totalAmount: true }
+                        });
+                        labels.push(d.toLocaleDateString('en-IN', { month: 'short' }));
+                        data.push(stats._count.id);
+                        revenueData.push(Number(stats._sum.totalAmount || 0));
+
+                        current.setMonth(current.getMonth() + 1);
+                    }
+                }
+
+                return {
+                    data,
+                    revenueData,
+                    labels,
+                    summary: {
+                        current: data.reduce((a, b) => a + b, 0),
+                        previous: 0, // Simplified
+                        revenue: { current: revenueData.reduce((a, b) => a + b, 0), previous: 0 }
+                    }
+                };
+            })()
         },
         statusOverview: [
             { id: 'pending', label: 'Pending', current: statusMap.pending, previous: 0 },
@@ -313,7 +395,7 @@ const getShopAnalytics = async (shopId) => {
 const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
     const service = await prisma.service.findUnique({
         where: { id: serviceId },
-        include: { 
+        include: {
             shop: {
                 select: {
                     averageRating: true,
@@ -352,7 +434,7 @@ const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
     });
 
     const completed = bookings.filter(b => b.status === 'COMPLETED');
-    
+
     // Revenue for THIS specific service
     const earnings = completed.reduce((sum, b) => {
         const item = b.services.find(s => s.id === serviceId);
@@ -368,7 +450,7 @@ const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
         for (let i = 0; i < 12; i++) {
             const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
             labels.push(d.toLocaleString('default', { month: 'short' }));
-            
+
             const nextD = new Date(d.getFullYear(), d.getMonth() + 1, 1);
             const count = bookings.filter(b => b.createdAt >= d && b.createdAt < nextD).length;
             dataset.push(count);
@@ -378,7 +460,7 @@ const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
         for (let i = 0; i < 4; i++) {
             const d = new Date(startDate.getTime() + (i * 7 * 24 * 60 * 60 * 1000));
             labels.push(`W${i + 1}`);
-            
+
             const nextD = new Date(d.getTime() + (7 * 24 * 60 * 60 * 1000));
             const count = bookings.filter(b => b.createdAt >= d && b.createdAt < nextD).length;
             dataset.push(count);
@@ -392,7 +474,7 @@ const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
             d.setHours(0, 0, 0, 0);
             const nextD = new Date(d);
             nextD.setDate(d.getDate() + 1);
-            
+
             labels.push(dayLabels[i]);
             const count = bookings.filter(b => b.createdAt >= d && b.createdAt < nextD).length;
             dataset.push(count);
@@ -410,7 +492,7 @@ const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
     // 4. Comparison with previous period
     const duration = endDate.getTime() - startDate.getTime();
     const prevStart = new Date(startDate.getTime() - duration);
-    
+
     const prevBookings = await prisma.booking.findMany({
         where: {
             services: { some: { id: serviceId } },
@@ -438,7 +520,7 @@ const getServiceAnalytics = async (serviceId, period = 'thisWeek') => {
             count: aggregatedRatings._count.id || service.reviewCount || 0,
             // Calculate satisfaction rate (assuming 5 is Like/Positive, 1 is Dislike/Negative)
             // We treat anything >= 3 as positive for this calculation
-            satisfactionRate: service.reviewCount > 0 
+            satisfactionRate: service.reviewCount > 0
                 ? Math.round(((aggregatedRatings._avg.rating || service.averageRating) / 5) * 100)
                 : 100
         },

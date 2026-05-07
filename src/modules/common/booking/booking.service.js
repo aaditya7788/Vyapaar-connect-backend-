@@ -102,6 +102,38 @@ class BookingService {
     }
 
     /**
+     * Robust helper to combine Date and Time strings into a single DateTime object.
+     * Handles formats: "09:00 AM", "21:30", etc.
+     */
+    _getScheduledDateTime(date, timeStr) {
+        if (!date || !timeStr) return null;
+        try {
+            const scheduledDateStr = new Date(date).toISOString().split('T')[0];
+            let hours = 0, minutes = 0;
+            
+            if (timeStr.includes(' ')) {
+                const [time, period] = timeStr.split(' ');
+                const timeParts = time.split(':').map(Number);
+                hours = timeParts[0];
+                minutes = timeParts[1] || 0;
+                if (period === 'PM' && hours < 12) hours += 12;
+                if (period === 'AM' && hours === 12) hours = 0;
+            } else {
+                const timeParts = timeStr.split(':').map(Number);
+                hours = timeParts[0];
+                minutes = timeParts[1] || 0;
+            }
+            // Force UTC by adding 'Z' if not present, to ensure consistency with Date.now()
+            // This prevents timezone shifts where a job expires "exactly at scheduled time" 
+            // due to server being in UTC and user being in a negative offset (like New York).
+            const isoString = `${scheduledDateStr}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00Z`;
+            return new Date(isoString);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
      * Lazy expiry — mark all PENDING bookings older than timeout as EXPIRED.
      * Also marks active jobs (CONFIRMED/IN_PROGRESS) as EXPIRED if past 4 hours.
      * Called before list fetches and status updates to ensure consistency.
@@ -112,24 +144,25 @@ class BookingService {
 
         const now = new Date();
         const pendingCutoff = new Date(now.getTime() - acceptTimeout * 60 * 1000);
-        const activeCutoff = new Date(now.getTime() - activeTimeoutHours * 60 * 60 * 1000);
 
         try {
             // 0. Process On-Demand Dispatch Queue
             await this.processDispatchQueue(extraWhere);
 
-            // 1. Identify bookings that will expire now
-            const toExpire = await prisma.booking.findMany({
+            // 1. Fetch potential candidates for expiration
+            // We fetch more broadly and filter in JS to handle complex 'Scheduled Time' logic
+            const candidates = await prisma.booking.findMany({
                 where: {
-                    OR: [
-                        { status: 'PENDING', createdAt: { lt: pendingCutoff } },
-                        { status: { in: ['CONFIRMED', 'ARRIVED', 'IN_PROGRESS'] }, updatedAt: { lt: activeCutoff } }
-                    ],
+                    status: { in: ['PENDING', 'CONFIRMED', 'ARRIVED', 'IN_PROGRESS'] },
                     ...extraWhere
                 },
                 select: { 
                     id: true, 
                     userId: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    scheduledDate: true,
                     scheduledTime: true,
                     totalAmount: true,
                     shop: { select: { category: true } },
@@ -139,6 +172,34 @@ class BookingService {
                     }
                 }
             });
+
+            const toExpire = [];
+            for (const b of candidates) {
+                if (b.status === 'PENDING') {
+                    // Rule: Expire if provider didn't respond within the acceptance window
+                    if (b.createdAt < pendingCutoff) {
+                        console.log(`⏳ [Expiry] Expiring PENDING booking ${b.id}: Created at ${b.createdAt}, Cutoff was ${pendingCutoff}`);
+                        toExpire.push(b);
+                    }
+                } else {
+                    // Rule: Expire if past (Scheduled Time + ACTIVE_TIMEOUT_HOURS)
+                    // We use Math.max to ensure we don't expire if they are actively updating it, 
+                    // and we use the scheduled time to prevent premature expiry for future jobs.
+                    const scheduledDateTime = this._getScheduledDateTime(b.scheduledDate, b.scheduledTime);
+                    const expiryFromUpdate = new Date(b.updatedAt.getTime() + activeTimeoutHours * 60 * 60 * 1000);
+                    
+                    let finalExpiry = expiryFromUpdate;
+                    if (scheduledDateTime) {
+                        const expiryFromSchedule = new Date(scheduledDateTime.getTime() + activeTimeoutHours * 60 * 60 * 1000);
+                        if (expiryFromSchedule > finalExpiry) finalExpiry = expiryFromSchedule;
+                    }
+
+                    if (now > finalExpiry) {
+                        console.log(`⏰ [Expiry] Expiring ACTIVE booking ${b.id}: Final Expiry was ${finalExpiry}, Current time is ${now}`);
+                        toExpire.push(b);
+                    }
+                }
+            }
 
             if (toExpire.length > 0) {
                 const ids = toExpire.map(b => b.id);
@@ -989,11 +1050,11 @@ class BookingService {
 
         // Live expiry check (Sync with lazy sweep)
         if (booking.status === 'PENDING') {
-            const timeout = await this.getGlobalSetting('BOOKING_EXPIRE_TIME', 15);
+            const timeout = await this.getGlobalSetting('ACCEPT_TIMEOUT_MIN', CONFIG.ACCEPT_TIMEOUT_MIN);
             const elapsed = Date.now() - new Date(booking.createdAt).getTime();
             if (elapsed > timeout * 60 * 1000) {
                 await prisma.booking.update({ where: { id }, data: { status: 'EXPIRED' } });
-                throw new Error('This booking has expired (provider did not respond in time).');
+                throw new Error('This booking has expired (acceptance window closed).');
             }
         }
 
@@ -1046,27 +1107,10 @@ class BookingService {
                     
                     if (cancelWindow > 0) {
                         const now = new Date();
-                        const scheduledDate = new Date(booking.scheduledDate);
+                        const scheduledDateTime = this._getScheduledDateTime(booking.scheduledDate, booking.scheduledTime);
+                        if (!scheduledDateTime) throw new Error('Could not determine scheduled time for cancellation check');
                         
-                        // Parse scheduledTime (Handles "09:30 AM" or "21:30")
-                        let hours = 0, minutes = 0;
-                        const timeStr = booking.scheduledTime || "00:00 AM";
-                        
-                        if (timeStr.includes(' ')) {
-                            const [time, period] = timeStr.split(' ');
-                            const [h, m] = time.split(':').map(Number);
-                            hours = h;
-                            minutes = m || 0;
-                            if (period === 'PM' && hours < 12) hours += 12;
-                            if (period === 'AM' && hours === 12) hours = 0;
-                        } else {
-                            const [h, m] = timeStr.split(':').map(Number);
-                            hours = h;
-                            minutes = m || 0;
-                        }
-                        
-                        scheduledDate.setHours(hours, minutes, 0, 0);
-                        const diffHours = (scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+                        const diffHours = (scheduledDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
                         
                         if (diffHours < cancelWindow) {
                             throw new Error(`Cancellation is not possible as your appointment is scheduled within ${cancelWindow} hours.`);

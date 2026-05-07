@@ -3,7 +3,8 @@ const analyticsService = require('./analytics.service');
 const getAnalytics = async (req, res) => {
     try {
         const { id } = req.params;
-        const stats = await analyticsService.getShopAnalytics(id);
+        const { startDate, endDate } = req.query;
+        const stats = await analyticsService.getShopAnalytics(id, startDate, endDate);
         res.status(200).json({ status: 'success', data: stats });
     } catch (err) {
         res.status(err.status || 500).json({ status: 'error', message: err.message });
