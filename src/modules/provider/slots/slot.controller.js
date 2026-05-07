@@ -47,12 +47,12 @@ const getShopConfig = async (req, res) => {
  */
 const upsertConfig = async (req, res) => {
     try {
-        const { shopId, dayOfWeek, startTime, endTime, configs } = req.body;
+        const { shopId, dayOfWeek, startTime, endTime, configs, shouldOverride, clearDay, targetDay, targetDate, clearAllHolidays } = req.body;
 
         // Support both single and bulk upsert
         if (configs && Array.isArray(configs)) {
             if (!shopId) return response.error(res, 'shopId is required for bulk update', 'VALIDATION_ERROR', 400);
-            const data = await slotService.bulkUpsertConfigs(shopId, configs);
+            const data = await slotService.bulkUpsertConfigs(shopId, configs, shouldOverride, clearDay, targetDay, targetDate, clearAllHolidays);
             return response.success(res, 'Bulk slot config saved', data, 201);
         }
 
@@ -60,7 +60,7 @@ const upsertConfig = async (req, res) => {
             return response.error(res, 'shopId, dayOfWeek, startTime, endTime are required', 'VALIDATION_ERROR', 400);
         }
 
-        const config = await slotService.upsertConfig(shopId, req.body);
+        const config = await slotService.upsertConfig(shopId, req.body, shouldOverride);
         return response.success(res, 'Slot config saved', config, 201);
     } catch (error) {
         console.error('[SLOTS] upsertConfig error:', error);

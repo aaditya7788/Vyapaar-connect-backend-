@@ -215,7 +215,55 @@ class SlotService {
     /**
      * Save multiple slot configs in a single transaction.
      */
-    async bulkUpsertConfigs(shopId, configs) {
+    async bulkUpsertConfigs(shopId, configs, shouldOverride = false, clearDay = false, targetDay = null, targetDate = null, clearAllHolidays = false) {
+        if (clearAllHolidays) {
+            await prisma.shopSlotConfig.deleteMany({
+                where: {
+                    shopId,
+                    date: { not: null }
+                }
+            });
+        } else if (clearDay) {
+            // Determine which days/dates to clear. 
+            // Use explicitly provided targetDay/targetDate, or derive from configs if empty.
+            let daysToClear = targetDay !== null ? [targetDay] : [];
+            let datesToClear = targetDate !== null ? [targetDate] : [];
+
+            if (daysToClear.length === 0 && datesToClear.length === 0 && configs.length > 0) {
+                daysToClear = [...new Set(configs.filter(c => c.dayOfWeek !== undefined && !c.date).map(c => c.dayOfWeek))];
+                datesToClear = [...new Set(configs.filter(c => c.date).map(c => c.date))];
+            }
+
+            if (daysToClear.length > 0 || datesToClear.length > 0) {
+                await prisma.shopSlotConfig.deleteMany({
+                    where: {
+                        shopId,
+                        OR: [
+                            { dayOfWeek: { in: daysToClear }, date: null },
+                            { date: { in: datesToClear.map(d => new Date(d)) } }
+                        ]
+                    }
+                });
+            }
+        } else if (shouldOverride) {
+            // Time-based override: remove exact matches for same time/day to prevent duplicates
+            // We exclude IDs that are explicitly provided in the configs to allow updating them instead of deleting
+            const updatingIds = configs.filter(c => c.id).map(c => c.id);
+            
+            for (const config of configs) {
+                await prisma.shopSlotConfig.deleteMany({
+                    where: {
+                        shopId,
+                        id: { notIn: updatingIds },
+                        dayOfWeek: config.dayOfWeek,
+                        date: config.date ? new Date(config.date) : null,
+                        startTime: config.startTime,
+                        endTime: config.endTime
+                    }
+                });
+            }
+        }
+
         return await prisma.$transaction(
             configs.map((config) => {
                 const { id, dayOfWeek, date, startTime, endTime, slotDuration, maxBookings, isBreak, isActive, label } = config;
@@ -246,7 +294,7 @@ class SlotService {
     /**
      * Save slot config for a shop + day (upserts the record).
      */
-    async upsertConfig(shopId, config) {
+    async upsertConfig(shopId, config, shouldOverride = false) {
         const { id, dayOfWeek, date, startTime, endTime, slotDuration, maxBookings, isBreak, isActive, label } = config;
 
         if (id) {
