@@ -1,9 +1,6 @@
 const prisma = require('../../../db');
 
 const PUBLIC_SETTING_KEYS = [
-    'BOOKING_EXPIRE_TIME', 
-    'BOOKING_ALERT_DURATION', 
-    'BOOKING_ALERT_REPEAT', 
     'early_call_charge_coin', 
     'ACCEPT_TIMEOUT_MIN', 
     'TRUST_ALERT_THRESHOLD', 
@@ -13,7 +10,9 @@ const PUBLIC_SETTING_KEYS = [
     'SUPPORT_EMAIL',
     'TERMS_AND_CONDITIONS',
     'PRIVACY_POLICY',
-    'MAINTENANCE_MODE'
+    'MAINTENANCE_MODE',
+    'STRICT_KM_FILTER',
+    'RADIUS_FILTER_KM'
 ];
 
 /**

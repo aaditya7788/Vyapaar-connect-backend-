@@ -114,6 +114,15 @@ const searchDiscovery = async (filters, userId = null) => {
     const skip = (page - 1) * limit;
     const take = parseInt(limit);
 
+    // ── Batch Fetch Global Settings (Optimization) ──
+    const globalSettings = await prisma.globalSettings.findMany({
+        where: { key: { in: ['RADIUS_FILTER_KM', 'STRICT_KM_FILTER', 'booking_request_fee'] } }
+    });
+
+    const radius = parseFloat(globalSettings.find(s => s.key === 'RADIUS_FILTER_KM')?.value || '15');
+    const isStrict = globalSettings.find(s => s.key === 'STRICT_KM_FILTER')?.value === 'true';
+    const requestFee = parseInt(globalSettings.find(s => s.key === 'booking_request_fee')?.value || '0');
+
     const whereShop = { status: 'VERIFIED' };
     const whereService = { isActive: true, shop: { status: 'VERIFIED' } };
 
@@ -164,7 +173,19 @@ const searchDiscovery = async (filters, userId = null) => {
     }
 
     // Memory efficiency: cap the initial query fetch (LOW RAM optimization).
-    const CAP = 30;
+    const CAP = 20; // Reduced for performance
+    
+    // Dynamic include based on fee (Skip joins if fee is 0)
+    const providerInclude = requestFee > 0 ? {
+        providerProfile: {
+            include: {
+                user: {
+                    include: { credits: { select: { balance: true } } }
+                }
+            }
+        }
+    } : {};
+
     const [rawShops, rawServices] = await Promise.all([
         prisma.shop.findMany({
             where: whereShop,
@@ -174,7 +195,8 @@ const searchDiscovery = async (filters, userId = null) => {
                     where: { isActive: true }, 
                     take: 2,
                     include: { configurableInclusions: true }
-                }
+                },
+                ...providerInclude
             },
             take: CAP,
             orderBy: orderBy
@@ -183,7 +205,10 @@ const searchDiscovery = async (filters, userId = null) => {
             where: whereService,
             include: {
                 shop: {
-                    include: { community: true }
+                    include: { 
+                        community: true,
+                        ...providerInclude
+                    }
                 }
             },
             take: CAP,
@@ -225,45 +250,56 @@ const searchDiscovery = async (filters, userId = null) => {
     });
 
     // --- Availability Filtering ---
-    if (date) {
+    if (date && date !== 'OPEN_PICKER') {
         const availabilityCache = new Map();
+        const dayOfWeek = new Date(date).getUTCDay();
+        const daysMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const currentDayStr = daysMap[dayOfWeek];
 
         const checkAvailability = async (item) => {
-            const shopId = item.type === 'SHOP' ? item.id : (item.shopId || item.shop?.id);
+            const shop = item.type === 'SHOP' ? item : (item.shop);
+            const shopId = shop?.id;
             if (!shopId) return true;
 
-            // Use cache to avoid redundant DB/Logic hits for multiple services of same shop
+            // 1. Fast Path: Check working days (pre-fetched)
+            if (shop.workingDays && !shop.workingDays.includes(currentDayStr)) {
+                return false;
+            }
+
+            // 2. Use cache to avoid redundant hits
             if (availabilityCache.has(shopId)) return availabilityCache.get(shopId);
 
             try {
                 const availability = await slotService.getAvailableSlots(shopId, date);
-                
-                // Logic: A provider is "Available" only if:
-                // 1. They are NOT closed by weekly schedule
-                // 2. They are NOT on a specific date holiday
-                // 3. They have AT LEAST one slot with status 'available'
-                const isAvailable = 
-                    !availability.isClosed && 
-                    !availability.isHoliday && 
-                    availability.slots.length > 0 && 
+                const isAvailable =
+                    !availability.isClosed &&
+                    !availability.isHoliday &&
+                    availability.slots.length > 0 &&
                     availability.slots.some(s => s.status === 'available');
 
                 availabilityCache.set(shopId, isAvailable);
                 return isAvailable;
             } catch (error) {
                 console.error(`[Search Availability Error] Shop ${shopId}:`, error);
-                availabilityCache.set(shopId, true); // Fallback to show on error
-                return true; 
+                return true;
             }
         };
 
-        const availabilityResults = await Promise.all(mixed.map(item => checkAvailability(item)));
-        mixed = mixed.filter((_, index) => availabilityResults[index]);
+        // 3. Batched Parallel Execution to prevent DB saturation (Max 10 at a time)
+        const batchSize = 10;
+        const results = [];
+        for (let i = 0; i < mixed.length; i += batchSize) {
+            const batch = mixed.slice(i, i + batchSize);
+            const batchResults = await Promise.all(batch.map(item => checkAvailability(item)));
+            results.push(...batchResults);
+        }
+        mixed = mixed.filter((_, index) => results[index]);
     }
 
     if (lat && lng) {
         const latFloat = parseFloat(lat);
         const lngFloat = parseFloat(lng);
+
         mixed = mixed.map(item => {
             const latitude = item.type === 'SHOP' ? item.latitude : item.shop?.latitude;
             const longitude = item.type === 'SHOP' ? item.longitude : item.shop?.longitude;
@@ -281,6 +317,13 @@ const searchDiscovery = async (filters, userId = null) => {
 
             return { ...item, distance };
         });
+
+        // ── Strict Enforcement ──
+        if (isStrict) {
+            const originalCount = mixed.length;
+            mixed = mixed.filter(item => item.distance === null || item.distance <= radius);
+            console.log(`🛡️ [Search Strict] Filtered out ${originalCount - mixed.length} results beyond ${radius}km`);
+        }
     }
 
     // Fetch penalty factor from settings (Dynamic - No hardcode)
@@ -329,6 +372,22 @@ const searchDiscovery = async (filters, userId = null) => {
         });
     }
 
+    // --- Credit Balance Filtering (Phase 2.1 Stabilization) ---
+    if (requestFee > 0) {
+        const originalCount = mixed.length;
+        mixed = mixed.filter(item => {
+            const balance = item.type === 'SHOP' 
+                ? item.providerProfile?.user?.credits?.balance 
+                : item.shop?.providerProfile?.user?.credits?.balance;
+            
+            // If balance is missing (not initialized), assume 0
+            return (balance || 0) >= requestFee;
+        });
+        if (originalCount !== mixed.length) {
+            console.log(`💰 [Search Credit Check] Filtered out ${originalCount - mixed.length} providers with insufficient balance (< ${requestFee})`);
+        }
+    }
+
     const total = mixed.length;
     const shops = mixed.slice(skip, skip + take);
 
@@ -364,17 +423,16 @@ const searchDiscovery = async (filters, userId = null) => {
  */
 const getHomeServices = async (lat, lng, radiusKm = 10) => {
     // 1. Fetch effective radius and strictness flag from GlobalSettings
-    const settings = await prisma.globalSettings.findMany({
-        where: { key: { in: ['RADIUS_FILTER_KM', 'STRICT_KM_FILTER', 'NEARBY_RADIUS_KM'] } }
+    const globalSettings = await prisma.globalSettings.findMany({
+        where: { key: { in: ['RADIUS_FILTER_KM', 'STRICT_KM_FILTER', 'NEARBY_RADIUS_KM', 'booking_request_fee', 'REMARK_DISTANCE_PENALTY', 'REMARK_PENALTY_FACTOR'] } }
     });
 
-    let effectiveRadius = radiusKm;
-    let isStrict = true; // Default to strict so users aren't confused by far away shops.
-
-    settings.forEach(s => {
-        if (s.key === 'RADIUS_FILTER_KM' || s.key === 'NEARBY_RADIUS_KM') effectiveRadius = parseFloat(s.value);
-        if (s.key === 'STRICT_KM_FILTER') isStrict = s.value === 'true';
-    });
+    const radiusFromDb = parseFloat(globalSettings.find(s => s.key === 'RADIUS_FILTER_KM' || s.key === 'NEARBY_RADIUS_KM')?.value || '15');
+    const isStrict = globalSettings.find(s => s.key === 'STRICT_KM_FILTER')?.value === 'true';
+    const effectiveRadius = radiusKm ? parseFloat(radiusKm) : radiusFromDb;
+    const requestFee = parseInt(globalSettings.find(s => s.key === 'booking_request_fee')?.value || '0');
+    const distPenalty = parseFloat(globalSettings.find(s => s.key === 'REMARK_DISTANCE_PENALTY')?.value || '5');
+    const penaltyFactor = parseFloat(globalSettings.find(s => s.key === 'REMARK_PENALTY_FACTOR')?.value || '0.1');
 
     // 2. Fetch all visible categories
     const categories = await prisma.category.findMany({
@@ -387,35 +445,24 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
         }
     });
 
-    // 1.1 Fetch penalty factors (Dynamic - No hardcode)
-    const distPenaltySetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_DISTANCE_PENALTY' } });
-    const distPenalty = distPenaltySetting ? parseFloat(distPenaltySetting.value) : 5;
-
-    const penaltySetting = await prisma.globalSettings.findUnique({ where: { key: 'REMARK_PENALTY_FACTOR' } });
-    const penaltyFactor = penaltySetting ? parseFloat(penaltySetting.value) : 0.1;
-
     let shops = [];
     if (lat && lng) {
-        const radiusSetting = await prisma.globalSettings.findUnique({ where: { key: 'RADIUS_FILTER_KM' } });
-        const radius = radiusSetting ? parseFloat(radiusSetting.value) : 15;
-
-        const strictSetting = await prisma.globalSettings.findUnique({ where: { key: 'STRICT_KM_FILTER' } });
-        const isStrict = strictSetting ? strictSetting.value === 'true' : true;
-
-        const effectiveRadius = radiusKm ? parseFloat(radiusKm) : radius;
         const latFloat = parseFloat(lat);
         const lngFloat = parseFloat(lng);
 
-        console.log('🔍 [HomeServices] Search params:', { lat, lng, radius, isStrict, effectiveRadius, distPenalty });
+        console.log('🔍 [HomeServices] Search params:', { lat, lng, radius: radiusFromDb, isStrict, effectiveRadius, distPenalty });
 
         if (isStrict) {
             // HA strict enforcement - hide everything beyond the radius
             shops = await prisma.$queryRaw`
                 SELECT * FROM (
-                    SELECT id, name, "profileImage", latitude, longitude, "remarkScore", category,
-                    (6371 * acos(cos(radians(${latFloat})) * cos(radians(latitude)) * cos(radians(longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(latitude)))) AS distance
-                    FROM "Shop"
-                    WHERE status = 'VERIFIED' AND latitude IS NOT NULL AND longitude IS NOT NULL
+                    SELECT s.id, s.name, s."profileImage", s.latitude, s.longitude, s."remarkScore", s.category,
+                    (6371 * acos(cos(radians(${latFloat})) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(s.latitude)))) AS distance,
+                    COALESCE(uc.balance, 0) as "creditBalance"
+                    FROM "Shop" s
+                    JOIN "ProviderProfile" pp ON s."providerProfileId" = pp.id
+                    LEFT JOIN "UserCredits" uc ON pp."userId" = uc."userId"
+                    WHERE s.status = 'VERIFIED' AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
                 ) AS nearby_shops
                 WHERE distance <= ${effectiveRadius}
                 ORDER BY (distance + (COALESCE("remarkScore", 0) * ${distPenalty})) ASC
@@ -424,10 +471,13 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
             // HA relaxed enforcement
             shops = await prisma.$queryRaw`
                 SELECT * FROM (
-                    SELECT id, name, "profileImage", latitude, longitude, "remarkScore", category,
-                    (6371 * acos(cos(radians(${latFloat})) * cos(radians(latitude)) * cos(radians(longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(latitude)))) AS distance
-                    FROM "Shop"
-                    WHERE status = 'VERIFIED' AND latitude IS NOT NULL AND longitude IS NOT NULL
+                    SELECT s.id, s.name, s."profileImage", s.latitude, s.longitude, s."remarkScore", s.category,
+                    (6371 * acos(cos(radians(${latFloat})) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(s.latitude)))) AS distance,
+                    COALESCE(uc.balance, 0) as "creditBalance"
+                    FROM "Shop" s
+                    JOIN "ProviderProfile" pp ON s."providerProfileId" = pp.id
+                    LEFT JOIN "UserCredits" uc ON pp."userId" = uc."userId"
+                    WHERE s.status = 'VERIFIED' AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
                 ) AS nearby_shops
                 ORDER BY (distance + (COALESCE("remarkScore", 0) * ${distPenalty})) ASC
                 LIMIT 50
@@ -481,13 +531,22 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
         ).map(srv => {
             const shopMatch = shops.find(s => s.id === srv.shopId);
             const score = parseFloat(srv.shop?.averageRating || 0) - (parseInt(srv.shop?.remarkScore || 0) * penaltyFactor);
+            
+            // Credit check for Home Services (Optimization: use pre-fetched requestFee)
+            const hasCredits = (shopMatch?.creditBalance || 0) >= requestFee;
+
             return {
                 ...srv,
                 distance: shopMatch ? shopMatch.distance : null,
                 supportsQuantity: cat.supportsQuantity || false,
-                sortScore: score
+                sortScore: score,
+                isAvailableByCredits: hasCredits
             };
-        }).sort((a, b) => b.sortScore - a.sortScore);
+        }).filter(srv => {
+            if (requestFee <= 0) return true; // Skip check if fee is 0
+            return srv.isAvailableByCredits;
+        })
+        .sort((a, b) => b.sortScore - a.sortScore);
 
         return {
             categoryId: cat.id,
