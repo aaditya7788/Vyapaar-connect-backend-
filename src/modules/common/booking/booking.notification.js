@@ -59,6 +59,14 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
         }
     });
 
+    // 🔥 FCM REQUIREMENT: All values in 'data' must be strings
+    const stringifiedData = {};
+    Object.keys(data).forEach(key => {
+        if (data[key] !== null && data[key] !== undefined) {
+            stringifiedData[key] = String(data[key]);
+        }
+    });
+
     // 2. Dispatch to Firebase (FCM)
     if (fcmTokens.length > 0) {
         try {
@@ -68,27 +76,31 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
                 for (let i = 0; i < fcmTokens.length; i += CHUNK_SIZE) {
                     const chunk = fcmTokens.slice(i, i + CHUNK_SIZE);
                     const message = {
+                        // Root priority for background delivery
+                        priority: 'high',
                         // Include system notification block ONLY if not data-only
                         ...(!data.isDataOnly && {
                             notification: {
                                 title,
                                 body,
-                                image: bannerUrl
+                                ...(bannerUrl && { image: bannerUrl })
                             },
                             android: {
+                                // Android-specific priority
+                                priority: 'high',
                                 notification: {
                                     channelId: channelId,
                                     priority: 'max',
                                     sound: 'default',
                                     defaultSound: true,
                                     notificationPriority: 'priority_max',
-                                    imageUrl: bannerUrl
+                                    ...(bannerUrl && { imageUrl: bannerUrl })
                                 }
                             }
                         }),
                         // Data payload is ALWAYS sent
                         data: {
-                            ...data,
+                            ...stringifiedData,
                             title: title || '',
                             body: body || '',
                             imageUrl: bannerUrl || data.imageUrl || '',
@@ -111,7 +123,10 @@ const _dispatchToServices = async (registrationTokens, { title, body }, data = {
                                     errorCode === 'messaging/registration-token-not-registered' ||
                                     errorCode === 'messaging/invalid-registration-token'
                                 ) {
+                                    console.error(`❌ [Push] FCM Token Invalid (${chunk[idx]}): ${resp.error?.message}`);
                                     invalidTokens.push(chunk[idx]);
+                                } else {
+                                    console.error(`❌ [Push] FCM Error for token ${chunk[idx]}: ${resp.error?.code} - ${resp.error?.message}`);
                                 }
                             }
                         });
@@ -354,6 +369,12 @@ const sendPushToCategory = async (category, { title, body }, data = {}) => {
  * Perspectives: CUSTOMER and PROVIDER
  */
 const BOOKING_NOTIFICATION_MAP = {
+    NEW_REQUEST: {
+        provider: {
+            title: '🔔 New Booking Request!',
+            body: (data) => `A customer requested a service for ₹${data.totalAmount}.`
+        }
+    },
     CONFIRMED: {
         customer: {
             title: 'Accepted! ✅',

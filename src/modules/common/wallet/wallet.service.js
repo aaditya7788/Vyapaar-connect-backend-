@@ -113,7 +113,7 @@ class WalletService {
      * Throws error if balance is insufficient
      */
     async deductCredits(userId, amount, type = 'USED', description = '', options = {}, tx = null) {
-        const { metadata = {}, bookingId = null } = options;
+        const { metadata = {}, bookingId = null, allowNegative = false } = options;
 
         const op = async (db) => {
             // 1. Check existing balance
@@ -121,14 +121,18 @@ class WalletService {
                 where: { userId }
             });
 
-            if (!wallet || wallet.balance < amount) {
-                throw new Error('Insufficient credit balance');
+            // If not allowing negative, block if insufficient
+            if (!allowNegative) {
+                if (!wallet || wallet.balance < amount) {
+                    throw new Error('Insufficient credit balance');
+                }
             }
 
-            // 2. Deduct credits
-            const updatedWallet = await db.userCredits.update({
+            // 2. Deduct credits (Upsert handles case where wallet record doesn't exist)
+            const updatedWallet = await db.userCredits.upsert({
                 where: { userId },
-                data: { balance: { decrement: amount } }
+                create: { userId, balance: -amount },
+                update: { balance: { decrement: amount } }
             });
 
             // 3. Log Ledger Entry

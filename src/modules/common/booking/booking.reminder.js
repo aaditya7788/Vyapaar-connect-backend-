@@ -170,13 +170,19 @@ async function processMorningSummaries() {
 function initReminderService() {
     console.log('🚀 [ReminderService] Background worker initialized.');
     
+    // Import BookingService here to avoid circular dependencies if possible, 
+    // or just use the instance if it's already a singleton.
+    const BookingService = require('./booking.service');
+    
     // Initial run
     processUpcomingReminders();
+    BookingService.expireStaleBookings();
     
     // Scheduled runs (Every 1 minute)
     setInterval(() => {
         processUpcomingReminders();
         processMorningSummaries();
+        BookingService.expireStaleBookings();
     }, 60 * 1000);
 }
 

@@ -165,7 +165,15 @@ class BookingService {
                     scheduledDate: true,
                     scheduledTime: true,
                     totalAmount: true,
-                    shop: { select: { category: true } },
+                    shopId: true,
+                    shop: { 
+                        select: { 
+                            id: true, 
+                            category: true, 
+                            providerProfile: { select: { userId: true } } 
+                        } 
+                    },
+                    user: { select: { fullName: true } },
                     items: {
                         include: { service: true },
                         take: 1
@@ -210,8 +218,9 @@ class BookingService {
                     data: { status: 'EXPIRED' }
                 });
 
-                // ── Stock Refund (Bulk Expiry) ──
+                // ── Stock Refund & Negligence Penalty (Bulk Expiry) ──
                 for (const b of toExpire) {
+                    // 1. Stock Refund
                     const bookingItems = await prisma.bookingItem.findMany({
                         where: { bookingId: b.id },
                         include: { service: true }
@@ -224,29 +233,71 @@ class BookingService {
                             });
                         }
                     }
+
+                    // 2. Negligence Penalty (If was Active)
+                    // If the booking was accepted but never completed, charge penalty and hit reputation
+                    if (b.status !== 'PENDING' && b.shop?.providerProfile?.userId) {
+                        try {
+                            await this._handleBookingExpiryPenalty(b, prisma);
+                        } catch (penaltyErr) {
+                            this._logError('Expiry penalty application failed', penaltyErr);
+                        }
+                    }
                 }
 
                 // 3. Notify affected users (Limited to 20 per sweep)
                 for (const booking of toExpire.slice(0, 20)) {
+                    // Notify Customer (UI Sync)
                     this._emit(`user_${booking.userId}`, 'booking_updated', {
                         bookingId: booking.id,
                         status: 'EXPIRED'
                     });
 
+                    // Notify Provider (UI Sync)
+                    if (booking.shop?.providerProfile?.userId) {
+                        this._emit(`user_${booking.shop.providerProfile.userId}`, 'booking_updated', {
+                            bookingId: booking.id,
+                            status: 'EXPIRED'
+                        });
+                    }
+
+                    const serviceName = booking.items?.[0]?.service?.name || 'Service';
+                    const customerName = booking.user?.fullName || 'A customer';
+
+                    // ── Notify Customer ──
+                    const customerTemplate = BOOKING_NOTIFICATION_MAP.EXPIRED.customer;
                     sendPushToUser(booking.userId, {
-                        title: 'Order Expired',
-                        body: 'Your booking has expired as it was not processed in time.'
+                        title: customerTemplate.title,
+                        body: typeof customerTemplate.body === 'function' ? customerTemplate.body({ serviceName }) : customerTemplate.body
                     }, {
                         type: 'booking_status',
                         bookingId: booking.id,
                         status: 'EXPIRED',
                         category: booking.shop?.category,
-                        serviceName: booking.items?.[0]?.service?.name || 'Service',
+                        serviceName,
                         scheduledTime: booking.scheduledTime,
                         totalAmount: booking.totalAmount || 0,
-                        targetContext: 'customer',
-                        isDataOnly: true // 🚀 Prevent duplicates
+                        targetContext: 'customer'
                     });
+
+                    // ── Notify Provider (Standard Expiry) ──
+                    if (booking.status === 'PENDING' && booking.shop?.providerProfile?.userId) {
+                        const providerUserId = booking.shop.providerProfile.userId;
+                        const providerTemplate = BOOKING_NOTIFICATION_MAP.EXPIRED.provider;
+
+                        console.log(`📡 [Push Debug] Sending Expiry Push to Provider: ${providerUserId}`);
+                        sendPushToUser(providerUserId, {
+                            title: providerTemplate.title,
+                            body: typeof providerTemplate.body === 'function' ? providerTemplate.body({ customerName, serviceName }) : providerTemplate.body
+                        }, {
+                            type: 'booking_status',
+                            bookingId: booking.id,
+                            status: 'EXPIRED',
+                            customerName,
+                            serviceName,
+                            targetContext: 'provider'
+                        });
+                    }
                 }
             }
         } catch (err) {
@@ -494,13 +545,21 @@ class BookingService {
                 createdAt: booking.createdAt
             });
 
+            const providerTemplate = BOOKING_NOTIFICATION_MAP.NEW_REQUEST.provider;
+            const customerName = booking.user?.fullName || 'A customer';
+            const serviceName = booking.items?.[0]?.service?.name || 'Service';
+
+            console.log(`📡 [Push Debug] Sending New Request Push to Provider: ${providerUserId}`);
             sendPushToUser(providerUserId, {
-                title: '🔔 New Booking Request!',
-                body: `A customer requested a service for ₹${booking.totalAmount}.`
+                title: providerTemplate.title,
+                body: typeof providerTemplate.body === 'function' ? providerTemplate.body({ totalAmount: booking.totalAmount }) : providerTemplate.body
             }, {
                 type: 'new_booking',
                 bookingId: booking.id,
                 shopId: firstShopId,
+                customerName,
+                serviceName,
+                totalAmount: String(booking.totalAmount),
                 targetContext: 'provider'
             });
 
@@ -1087,6 +1146,51 @@ class BookingService {
             where: { id: booking.id },
             data: { creditFeePaid: true, creditFeeAmount: { increment: fee } }
         });
+    }
+
+    /**
+     * Internal: Handle penalty deduction when booking expires in an active state
+     */
+    async _handleBookingExpiryPenalty(booking, tx) {
+        const fee = await this.getGlobalSetting('booking_expire_penalty', 0);
+        const providerUserId = booking.shop.providerProfile.userId;
+        const bookingNum = booking.displayId || `#BK-${booking.id.slice(0, 8).toUpperCase()}`;
+
+        // 1. Deduct Credits (Allowing Debt/Negative Balance as per Option 1)
+        if (fee > 0) {
+            await walletService.deductCredits(
+                providerUserId,
+                fee,
+                'USED',
+                `Expiry Penalty: ${bookingNum}`,
+                { bookingId: booking.id, allowNegative: true },
+                tx
+            );
+            
+            await tx.booking.update({
+                where: { id: booking.id },
+                data: { creditFeePaid: true, creditFeeAmount: { increment: fee } }
+            });
+
+            // ── Notify Provider (Push + Socket) ──
+            sendPushToUser(providerUserId, {
+                title: '⚠️ Negligence Penalty Charged',
+                body: `Booking ${bookingNum} was not completed in time. ${fee} credits have been deducted from your wallet.`
+            }, {
+                type: 'wallet_update',
+                bookingId: booking.id,
+                penaltyAmount: String(fee), // 🔥 MUST BE STRING for FCM
+                targetContext: 'provider'
+            });
+
+            this._emit(`user_${providerUserId}`, 'wallet_updated', {
+                bookingId: booking.id,
+                penaltyAmount: fee,
+                message: `Penalty charged for ${bookingNum}`
+            });
+        }
+
+        console.log(`⚠️ [Negligence] Applied Expiry Penalty to Provider ${providerUserId} for Booking ${bookingNum}`);
     }
 
     /**

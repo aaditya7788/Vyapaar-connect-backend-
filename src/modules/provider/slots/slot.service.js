@@ -42,7 +42,7 @@ class SlotService {
         } else if (modifier === 'AM' && hours === 12) {
             hours = 0;
         }
-        
+
         return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     }
 
@@ -85,7 +85,7 @@ class SlotService {
         const endOfDate = new Date(`${date}T23:59:59.999Z`);
 
         let allConfigs = await prisma.shopSlotConfig.findMany({
-            where: { 
+            where: {
                 shopId,
                 isActive: true,
                 OR: [
@@ -106,7 +106,7 @@ class SlotService {
         if (allConfigs.length === 0) {
             const start24 = this._format12to24(shop.workingHoursStart || '09:00 AM');
             const end24 = this._format12to24(shop.workingHoursEnd || '06:00 PM');
-            
+
             if (start24 && end24) {
                 allConfigs = [{
                     startTime: start24,
@@ -167,7 +167,7 @@ class SlotService {
                         const bEnd = this._timeToMinutes(b.endTime);
                         return t < bEnd && (t + duration) > bStart;
                     });
-                    
+
                     if (!slotsMap.has(slotStart)) {
                         slotsMap.set(slotStart, {
                             time: slotStart,
@@ -210,7 +210,7 @@ class SlotService {
         // 5. Apply Lead-Time Buffer (if date is today)
         const now = new Date();
         const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD in UTC
-        
+
         // Use a more robust today check (local date string)
         const todayLocal = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
         const isToday = date === todayLocal;
@@ -221,21 +221,32 @@ class SlotService {
             let bufferMin = 60; // Default fallback
 
             if (categoryName) {
-                const categoryRecord = await prisma.category.findUnique({ 
+                const categoryRecord = await prisma.category.findUnique({
                     where: { name: categoryName },
                     select: { bufferTimeMin: true }
                 });
-                
+
                 if (categoryRecord) {
                     bufferMin = categoryRecord.bufferTimeMin;
                 } else {
-                    // Fallback to GlobalSettings naming convention
+                    // Fallback to GlobalSettings naming convention (Case-insensitive)
                     const settings = await prisma.globalSettings.findMany({
-                        where: { key: { in: ['BOOKING_BUFFER_MIN', `BOOKING_BUFFER_MIN_${categoryName.toUpperCase()}`] } }
+                        where: {
+                            key: {
+                                in: [
+                                    'BOOKING_BUFFER_MIN',
+                                    'booking_buffer_min',
+                                    `BOOKING_BUFFER_MIN_${categoryName.toUpperCase()}`,
+                                    `booking_buffer_min_${categoryName.toLowerCase()}`
+                                ]
+                            }
+                        }
                     });
+
+                    const catKey = categoryName.toLowerCase();
                     bufferMin = parseInt(
-                        settings.find(s => s.key === `BOOKING_BUFFER_MIN_${categoryName.toUpperCase()}`)?.value || 
-                        settings.find(s => s.key === 'BOOKING_BUFFER_MIN')?.value || 
+                        settings.find(s => s.key.toLowerCase() === `booking_buffer_min_${catKey}`)?.value ||
+                        settings.find(s => s.key.toLowerCase() === 'booking_buffer_min')?.value ||
                         '60'
                     );
                 }
@@ -255,8 +266,8 @@ class SlotService {
             }
         }
 
-        return { 
-            isClosed: false, 
+        return {
+            isClosed: false,
             isHoliday,
             slots: Array.from(slotsMap.values()).sort((a, b) => a.time.localeCompare(b.time))
         };
@@ -309,7 +320,7 @@ class SlotService {
             // Time-based override: remove exact matches for same time/day to prevent duplicates
             // We exclude IDs that are explicitly provided in the configs to allow updating them instead of deleting
             const updatingIds = configs.filter(c => c.id).map(c => c.id);
-            
+
             for (const config of configs) {
                 await prisma.shopSlotConfig.deleteMany({
                     where: {
@@ -334,17 +345,17 @@ class SlotService {
                     });
                 }
                 return prisma.shopSlotConfig.create({
-                    data: { 
-                        shopId, 
-                        dayOfWeek, 
+                    data: {
+                        shopId,
+                        dayOfWeek,
                         date: date ? new Date(date) : null,
-                        startTime, 
-                        endTime, 
-                        slotDuration: slotDuration || 60, 
-                        maxBookings: maxBookings || 1, 
-                        isBreak: isBreak || false, 
+                        startTime,
+                        endTime,
+                        slotDuration: slotDuration || 60,
+                        maxBookings: maxBookings || 1,
+                        isBreak: isBreak || false,
                         isActive: isActive ?? true,
-                        label 
+                        label
                     },
                 });
             })
@@ -365,17 +376,17 @@ class SlotService {
         }
 
         return prisma.shopSlotConfig.create({
-            data: { 
-                shopId, 
-                dayOfWeek, 
+            data: {
+                shopId,
+                dayOfWeek,
                 date: date ? new Date(date) : null,
-                startTime, 
-                endTime, 
-                slotDuration: slotDuration || 60, 
-                maxBookings: maxBookings || 1, 
-                isBreak: isBreak || false, 
+                startTime,
+                endTime,
+                slotDuration: slotDuration || 60,
+                maxBookings: maxBookings || 1,
+                isBreak: isBreak || false,
                 isActive: isActive ?? true,
-                label 
+                label
             },
         });
     }
