@@ -242,11 +242,88 @@ const sendReportEmail = async (email, subject, buffer, filename) => {
   }
 };
 
+const sendShopVerificationEmail = async (email, fullName, { shopName, status, rejectionReason }) => {
+  if (env.APP_ENV !== 'production') {
+    console.log('────────────────────────────────────────────────');
+    console.log('[Mail Status] SIMULATED VERIFICATION (Dev Mode)');
+    console.log(`[Mail Status] Recipient: ${email}`);
+    console.log(`[Mail Status] Shop: ${shopName}`);
+    console.log(`[Mail Status] Status: ${status}`);
+    console.log('────────────────────────────────────────────────');
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const isVerified = status === 'VERIFIED';
+    const themeColor = isVerified ? '#2E7D32' : '#D32F2F';
+    const iconUrl = `${env.AWS.S3_BASE_URL}/uploads/branding/icon.png`.replace(/\/+/g, '/').replace('https:/', 'https://');
+    
+    const mailOptions = {
+      from: env.SMTP.FROM,
+      to: email,
+      subject: isVerified ? `🎉 Congratulations! ${shopName} is Verified` : `Update regarding your shop: ${shopName}`,
+      html: `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; padding: 0; border: 1px solid #eef2f1; border-radius: 16px; overflow: hidden; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+          <!-- Header Banner -->
+          <div style="background-color: ${themeColor}; padding: 40px 20px; text-align: center;">
+            <img src="${iconUrl}" alt="Vyapaar Connect" style="width: 70px; height: 70px; margin-bottom: 15px;" />
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">Vyapaar Connect</h1>
+          </div>
+
+          <div style="padding: 40px 30px;">
+            <h2 style="color: #333; margin-top: 0; font-size: 20px;">Hello ${fullName},</h2>
+            
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">
+              ${isVerified 
+                ? `We are thrilled to inform you that your shop <b>"${shopName}"</b> has successfully passed our verification process. Your business is now live and can start receiving bookings from customers.`
+                : `Thank you for your application to join Vyapaar Connect with <b>"${shopName}"</b>. After careful review, we require some updates before your shop can be approved.`}
+            </p>
+
+            ${!isVerified && rejectionReason ? `
+              <div style="background-color: #FFF5F5; border-left: 4px solid #D32F2F; padding: 20px; border-radius: 8px; margin: 25px 0;">
+                <p style="margin: 0; font-weight: bold; color: #D32F2F; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Rejection Feedback:</p>
+                <p style="margin: 10px 0 0 0; color: #444; font-size: 15px; line-height: 1.5;">"${rejectionReason}"</p>
+              </div>
+              <p style="color: #666; font-size: 14px;">Please review the feedback above, update your shop information in the app, and resubmit for verification.</p>
+            ` : `
+              <div style="background-color: #F1F8E9; border-left: 4px solid #2E7D32; padding: 20px; border-radius: 8px; margin: 25px 0;">
+                <p style="margin: 0; font-weight: bold; color: #2E7D32; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Status Update:</p>
+                <p style="margin: 10px 0 0 0; color: #444; font-size: 15px;">Your shop is now <b>VERIFIED</b> and active on the platform.</p>
+              </div>
+            `}
+
+            <div style="text-align: center; margin-top: 40px;">
+              <a href="${env.APP_URL || 'https://vyapaarconnect.com'}" style="background-color: ${themeColor}; color: #ffffff; padding: 16px 35px; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 16px; display: inline-block;">
+                ${isVerified ? 'Go to My Shop Profile' : 'Update Shop Details'}
+              </a>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div style="background-color: #f9fafb; padding: 30px; text-align: center; border-top: 1px solid #edf2f7;">
+            <p style="color: #999; font-size: 12px; line-height: 1.5; margin: 0;">
+              Vyapaar Connect - Empowering Local Businesses.<br/>
+              &copy; ${new Date().getFullYear()} OnePointSolution. All rights reserved.
+            </p>
+          </div>
+        </div>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(`[Mail] Error sending verification email:`, error);
+    return { success: false };
+  }
+};
+
 module.exports = {
   generateOTP,
   sendOTPEmail,
   sendPhoneOTPEmail,
   sendEmail,
   sendReportEmail,
+  sendShopVerificationEmail,
   transporter,
 };

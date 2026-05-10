@@ -46,6 +46,11 @@ const getHomeFeed = async () => {
         prisma.shop.findMany({
             where: {
                 status: 'VERIFIED',
+                isFrozen: false,
+                providerProfile: {
+                    isActive: true,
+                    user: { status: 'active' }
+                },
                 services: {
                     some: {
                         isFeatured: true,
@@ -73,6 +78,11 @@ const getHomeFeed = async () => {
         prisma.shop.findMany({
             where: {
                 status: 'VERIFIED',
+                isFrozen: false,
+                providerProfile: {
+                    isActive: true,
+                    user: { status: 'active' }
+                },
                 services: {
                     some: { isActive: true }
                 }
@@ -123,8 +133,25 @@ const searchDiscovery = async (filters, userId = null) => {
     const isStrict = globalSettings.find(s => s.key === 'STRICT_KM_FILTER')?.value === 'true';
     const requestFee = parseInt(globalSettings.find(s => s.key === 'booking_request_fee')?.value || '0');
 
-    const whereShop = { status: 'VERIFIED' };
-    const whereService = { isActive: true, shop: { status: 'VERIFIED' } };
+    const whereShop = { 
+        status: 'VERIFIED',
+        isFrozen: false,
+        providerProfile: {
+            isActive: true,
+            user: { status: 'active' }
+        }
+    };
+    const whereService = { 
+        isActive: true, 
+        shop: { 
+            status: 'VERIFIED',
+            isFrozen: false,
+            providerProfile: {
+                isActive: true,
+                user: { status: 'active' }
+            }
+        } 
+    };
 
     if (category) {
         whereShop.category = category;
@@ -194,7 +221,9 @@ const searchDiscovery = async (filters, userId = null) => {
                 services: { 
                     where: { isActive: true }, 
                     take: 2,
-                    include: { configurableInclusions: true }
+                    include: { 
+                        configurableInclusions: true
+                    }
                 },
                 ...providerInclude
             },
@@ -225,12 +254,14 @@ const searchDiscovery = async (filters, userId = null) => {
     const categoryNames = [...new Set(mixed.map(m => m.category).filter(Boolean))];
     const catSettings = await prisma.category.findMany({
         where: { name: { in: categoryNames } },
-        select: { name: true, supportsInclusions: true }
+        select: { name: true, supportsInclusions: true, supportsQuantity: true, isAppointmentBased: true }
     });
 
     mixed = mixed.map(item => {
         const setting = catSettings.find(c => c.name === item.category);
         const isModular = setting?.supportsInclusions || false;
+        const canSupportQty = setting?.supportsQuantity || false;
+        const isAppointment = setting?.isAppointmentBased || false;
 
         // If it's a shop, also tag its nested services
         if (item.type === 'SHOP' && item.services) {
@@ -238,14 +269,22 @@ const searchDiscovery = async (filters, userId = null) => {
                 const srvSetting = catSettings.find(c => c.name === (srv.category || item.category));
                 return {
                     ...srv,
-                    is_inclusion: srvSetting?.supportsInclusions || false
+                    is_inclusion: srvSetting?.supportsInclusions || false,
+                    supportsQuantity: srvSetting?.supportsQuantity || false,
+                    categorySettings: {
+                        isAppointmentBased: srvSetting?.isAppointmentBased || false
+                    }
                 };
             });
         }
 
         return {
             ...item,
-            is_inclusion: isModular
+            is_inclusion: isModular,
+            supportsQuantity: canSupportQty,
+            categorySettings: {
+                isAppointmentBased: isAppointment
+            }
         };
     });
 
@@ -456,7 +495,7 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
             // HA strict enforcement - hide everything beyond the radius
             shops = await prisma.$queryRaw`
                 SELECT * FROM (
-                    SELECT s.id, s.name, s."profileImage", s.latitude, s.longitude, s."remarkScore", s.category,
+                    SELECT s.id, s.name, s."profileImage", s.latitude, s.longitude, s."remarkScore", s.category, s.gallery, s."backgroundImages",
                     (6371 * acos(cos(radians(${latFloat})) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(s.latitude)))) AS distance,
                     COALESCE(uc.balance, 0) as "creditBalance"
                     FROM "Shop" s
@@ -471,7 +510,7 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
             // HA relaxed enforcement
             shops = await prisma.$queryRaw`
                 SELECT * FROM (
-                    SELECT s.id, s.name, s."profileImage", s.latitude, s.longitude, s."remarkScore", s.category,
+                    SELECT s.id, s.name, s."profileImage", s.latitude, s.longitude, s."remarkScore", s.category, s.gallery, s."backgroundImages",
                     (6371 * acos(cos(radians(${latFloat})) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(${lngFloat})) + sin(radians(${latFloat})) * sin(radians(s.latitude)))) AS distance,
                     COALESCE(uc.balance, 0) as "creditBalance"
                     FROM "Shop" s
@@ -540,7 +579,12 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
                 distance: shopMatch ? shopMatch.distance : null,
                 supportsQuantity: cat.supportsQuantity || false,
                 sortScore: score,
-                isAvailableByCredits: hasCredits
+                isAvailableByCredits: hasCredits,
+                categorySettings: {
+                    isAppointmentBased: cat.isAppointmentBased || false,
+                    supportsDailyMenu: cat.supportsDailyMenu || false,
+                    supportsInclusions: cat.supportsInclusions || false
+                }
             };
         }).filter(srv => {
             if (requestFee <= 0) return true; // Skip check if fee is 0
@@ -553,6 +597,7 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
             categoryName: cat.name,
             categoryIcon: cat.icon,
             isTrending: cat.isTrending || false,
+            supportsDailyMenu: cat.supportsDailyMenu || false,
             services: catServices.slice(0, 12),
             totalCount: catServices.length
         };

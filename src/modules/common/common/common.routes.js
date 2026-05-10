@@ -72,4 +72,19 @@ router.post('/upload/ad',
   commonController.uploadSingle
 );
 
+/**
+ * @route   POST /api/common/upload/gallery
+ * @desc    Multi-file upload for service galleries
+ * @access  Private
+ */
+router.post('/upload/gallery',
+  authMiddleware,
+  (req, res, next) => {
+    req.uploadFolder = 'uploads/services/gallery';
+    next();
+  },
+  upload.array('files', 10), // Limit to 10 images
+  commonController.uploadMultiple
+);
+
 module.exports = router;

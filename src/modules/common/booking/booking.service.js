@@ -210,6 +210,22 @@ class BookingService {
                     data: { status: 'EXPIRED' }
                 });
 
+                // ── Stock Refund (Bulk Expiry) ──
+                for (const b of toExpire) {
+                    const bookingItems = await prisma.bookingItem.findMany({
+                        where: { bookingId: b.id },
+                        include: { service: true }
+                    });
+                    for (const item of bookingItems) {
+                        if (item.service && item.service.stock !== -1 && item.service.stock !== null) {
+                            await prisma.service.update({
+                                where: { id: item.serviceId },
+                                data: { stock: { increment: item.quantity } }
+                            });
+                        }
+                    }
+                }
+
                 // 3. Notify affected users (Limited to 20 per sweep)
                 for (const booking of toExpire.slice(0, 20)) {
                     this._emit(`user_${booking.userId}`, 'booking_updated', {
@@ -326,6 +342,16 @@ class BookingService {
                         data: { status: 'EXPIRED' }
                     });
 
+                    // ── Stock Refund (Dispatch Timeout) ──
+                    for (const item of booking.items || []) {
+                        if (item.service && item.service.stock !== -1 && item.service.stock !== null) {
+                            await prisma.service.update({
+                                where: { id: item.serviceId },
+                                data: { stock: { increment: item.quantity } }
+                            });
+                        }
+                    }
+
                     // Notify Customer
                     this._emit(`user_${booking.userId}`, 'booking_updated', {
                         bookingId: booking.id,
@@ -393,6 +419,24 @@ class BookingService {
 
             // 4. Create Booking
             const displayId = await this._generateSecureId(tx, firstShopId, (await tx.shop.findUnique({ where: { id: firstShopId }, select: { name: true } }))?.name);
+
+            // ── Stock Validation & Decrement (On-Demand) ──
+            const dbServices = await tx.service.findMany({
+                where: { id: { in: services.map(s => s.serviceId) } }
+            });
+
+            for (const s of dbServices) {
+                if (s.stock !== -1 && s.stock !== null) {
+                    const requested = services.find(req => req.serviceId === s.id)?.quantity || 1;
+                    if (s.stock < requested) {
+                        throw new Error(`Booking failed: ${s.name} just went out of stock.`);
+                    }
+                    await tx.service.update({
+                        where: { id: s.id },
+                        data: { stock: { decrement: requested } }
+                    });
+                }
+            }
 
             const booking = await tx.booking.create({
                 data: {
@@ -481,6 +525,14 @@ class BookingService {
                 include: { providerProfile: true }
             });
             if (!shop) throw new Error('Provider shop not found');
+            
+            // ── Administrative Lockdown Checks ──
+            if (shop.isFrozen) {
+                throw new Error('Booking failed: This shop is temporarily frozen by an administrator.');
+            }
+            if (shop.providerProfile && !shop.providerProfile.isActive) {
+                throw new Error('Booking failed: The provider for this shop is currently suspended.');
+            }
 
             // ── Anti Double-Booking Check (Race Condition Protection) ──
             const startOfDay = new Date(new Date(scheduledDate).setUTCHours(0, 0, 0, 0));
@@ -516,6 +568,29 @@ class BookingService {
 
             if (dbServices.length !== services.length) {
                 throw new Error('Booking failed: Some selected services no longer exist. Please refresh your cart.');
+            }
+
+            // ── Stock Validation ──
+            const outOfStock = dbServices.filter(s => {
+                if (s.stock === -1 || s.stock === null) return false; // Unlimited
+                const requested = services.find(req => req.serviceId === s.id)?.quantity || 1;
+                return s.stock < requested;
+            });
+
+            if (outOfStock.length > 0) {
+                const names = outOfStock.map(s => s.name).join(', ');
+                throw new Error(`Booking failed: The following items just went out of stock: ${names}. Please refresh your cart.`);
+            }
+
+            // ── Stock Decrement ──
+            for (const s of dbServices) {
+                if (s.stock !== -1 && s.stock !== null) {
+                    const requested = services.find(req => req.serviceId === s.id)?.quantity || 1;
+                    await tx.service.update({
+                        where: { id: s.id },
+                        data: { stock: { decrement: requested } }
+                    });
+                }
             }
 
             // Calculate total amount with quantities
@@ -960,24 +1035,33 @@ class BookingService {
      */
     async _handleBookingCompletionCredits(booking, tx) {
         const fee = await this.getGlobalSetting('booking_complete_fee', 0);
-        if (fee <= 0) return;
+        if (fee > 0) {
+            const providerUserId = booking.shop.providerProfile.userId;
+            const bookingNum = booking.displayId || `#BK-${booking.id.slice(0, 8).toUpperCase()}`;
 
-        const providerUserId = booking.shop.providerProfile.userId;
-        const bookingNum = booking.displayId || `#BK-${booking.id.slice(0, 8).toUpperCase()}`;
+            await walletService.deductCredits(
+                providerUserId,
+                fee,
+                'USED',
+                `Completion Fee: ${bookingNum}`,
+                { bookingId: booking.id },
+                tx
+            );
 
-        await walletService.deductCredits(
-            providerUserId,
-            fee,
-            'USED',
-            `Completion Fee: ${bookingNum}`,
-            { bookingId: booking.id },
-            tx
-        );
+            await tx.booking.update({
+                where: { id: booking.id },
+                data: { creditFeePaid: true, creditFeeAmount: { increment: fee } }
+            });
+        }
 
-        await tx.booking.update({
-            where: { id: booking.id },
-            data: { creditFeePaid: true, creditFeeAmount: { increment: fee } }
-        });
+        // --- Trust & Safety: Apply Bonus ---
+        const bonusSetting = await this.getGlobalSetting('trust_score_bonus', 0);
+        if (bonusSetting > 0) {
+            const bonus = parseInt(bonusSetting);
+            await tx.shop.update({ where: { id: booking.shopId }, data: { remarkScore: { decrement: bonus } } });
+            await tx.user.update({ where: { id: booking.userId }, data: { remarkScore: { decrement: bonus } } });
+            console.log(`🛡️ [Trust System] Applied ${bonus}pt bonus to Shop ${booking.shopId} and User ${booking.userId}`);
+        }
     }
 
     /**
@@ -1146,6 +1230,24 @@ class BookingService {
 
             if (isProvider && status === 'DECLINED' && booking.status === 'PENDING') {
                 await this._handleBookingDeclineCredits(booking, tx);
+            }
+
+            // ── Stock Refund Logic (Phase: Quantitative Awareness) ──
+            const refundStatuses = ['CANCELLED', 'DECLINED', 'EXPIRED'];
+            if (refundStatuses.includes(status) && !refundStatuses.includes(booking.status)) {
+                const items = await tx.bookingItem.findMany({
+                    where: { bookingId: id },
+                    include: { service: true }
+                });
+
+                for (const item of items) {
+                    if (item.service && item.service.stock !== -1 && item.service.stock !== null) {
+                        await tx.service.update({
+                            where: { id: item.serviceId },
+                            data: { stock: { increment: item.quantity } }
+                        });
+                    }
+                }
             }
 
             if (status === 'CANCELLED') {

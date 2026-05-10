@@ -37,7 +37,7 @@ const getCategory = async (req, res) => {
  */
 const createCategory = async (req, res) => {
     try {
-        const { name, icon, supportsQuantity, mascotImage, startOtpRequired } = req.body;
+        const { name, icon, supportsQuantity, supportsGallery, mascotImage, startOtpRequired } = req.body;
         if (!name) return response.error(res, 'Name is required', 'VALIDATION_ERROR', 400);
 
         let iconUrl = icon;
@@ -57,8 +57,10 @@ const createCategory = async (req, res) => {
             name, 
             icon: iconUrl, 
             supportsQuantity: supportsQuantity === 'true' || supportsQuantity === true, 
+            supportsGallery: supportsGallery === 'true' || supportsGallery === true,
             mascotImage: mascotImageUrl, 
-            startOtpRequired: startOtpRequired === 'true' || startOtpRequired === true
+            startOtpRequired: startOtpRequired === 'true' || startOtpRequired === true,
+            bufferTimeMin: parseInt(req.body.bufferTimeMin) || 60
         });
         return response.success(res, 'Category created', category, 201);
     } catch (error) {
@@ -79,8 +81,14 @@ const updateCategory = async (req, res) => {
         if (updateData.supportsQuantity !== undefined) {
             updateData.supportsQuantity = updateData.supportsQuantity === 'true' || updateData.supportsQuantity === true;
         }
+        if (updateData.supportsGallery !== undefined) {
+            updateData.supportsGallery = updateData.supportsGallery === 'true' || updateData.supportsGallery === true;
+        }
         if (updateData.startOtpRequired !== undefined) {
             updateData.startOtpRequired = updateData.startOtpRequired === 'true' || updateData.startOtpRequired === true;
+        }
+        if (updateData.bufferTimeMin !== undefined) {
+            updateData.bufferTimeMin = parseInt(updateData.bufferTimeMin) || 60;
         }
 
         // Handle File Uploads to S3

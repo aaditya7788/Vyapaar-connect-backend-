@@ -116,8 +116,12 @@ model Category {
   icon             String?
   supportsQuantity Boolean       @default(false)
   supportsInclusions Boolean     @default(false)
+  supportsDailyMenu  Boolean     @default(false)
+  isAppointmentBased Boolean     @default(false)
   mascotImage      String?
+  supportsGallery  Boolean       @default(false)
   startOtpRequired     Boolean       @default(false)
+  bufferTimeMin    Int           @default(60)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   isVisible        Boolean       @default(true)
@@ -227,11 +231,17 @@ model Service {
   description    String?
   price          Float
   duration       String
+  unit           String?         @default("pcs") // kg, gm, ltr, ml, pcs, packet, etc.
+  stock          Int?            @default(-1)    // -1 means unlimited
+  minQuantity    Int             @default(1)
+  maxQuantity    Int             @default(99)
   category       String?
   subcategories  String[]        @default([])
   inclusions     String[]        @default([])
   isActive       Boolean         @default(true)
+  dailyMenu      Json?
   image          String?
+  gallery        String[]        @default([])
   shopId         String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -250,7 +260,6 @@ model ServiceInclusion {
   serviceId String
   name      String
   price     Float   @default(0)
-  isRequired Boolean @default(false)
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   @@index([serviceId])
@@ -304,6 +313,7 @@ model Booking {
   creditFeeAmount    Int                 @default(0)
   isCallUnlocked     Boolean             @default(false)
   declineReason      String?
+  reminderSent       Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   address            UserAddress?        @relation(fields: [addressId], references: [id], onDelete: SetNull)

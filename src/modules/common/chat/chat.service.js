@@ -470,26 +470,50 @@ class ChatService {
         const isProvider = Array.isArray(roles) && roles.includes('provider');
         const skip = (page - 1) * limit;
 
+        const activeTimeoutHours = await prisma.globalSettings.findUnique({ 
+            where: { key: 'ACTIVE_TIMEOUT_HOURS' } 
+        }).then(s => s ? parseFloat(s.value) : 24);
+
         // Find rooms where the user is either the customer (booking.userId)
         // or the provider (booking.shop.providerProfile.userId)
         const whereClause = {
             booking: {
-                OR: [
-                    { userId: userId },
-                    { shop: { providerProfile: { userId: userId } } }
+                AND: [
+                    {
+                        OR: [
+                            { userId: userId },
+                            { shop: { providerProfile: { userId: userId } } }
+                        ]
+                    }
                 ]
             }
         };
 
-        /**
-         * ROLE-BASED FILTERING (Phase Hardening)
-         * 1. Customers: Always see a per-booking clean view. Completed jobs disappear from Inbox.
-         * 2. Providers: Keep rooms visible for history/records as per shop context.
-         */
-        if (!includeAll && !isProvider) {
-            whereClause.booking.status = {
-                notIn: ['COMPLETED', 'CANCELLED', 'DECLINED', 'EXPIRED']
-            };
+        if (!includeAll) {
+            // 1. Filter by explicit terminal statuses
+            whereClause.booking.AND.push({
+                status: {
+                    notIn: ['COMPLETED', 'CANCELLED', 'DECLINED', 'EXPIRED']
+                }
+            });
+
+            // 2. Filter by date (Implicit Expiry)
+            // If a booking is PENDING or CONFIRMED but the scheduled date is in the past, hide it.
+            // We use the dynamic activeTimeoutHours grace period.
+            const expirationThreshold = new Date();
+            expirationThreshold.setHours(expirationThreshold.getHours() - activeTimeoutHours);
+
+            whereClause.booking.AND.push({
+                OR: [
+                    // Active statuses are always shown regardless of date
+                    { status: { in: ['ARRIVED', 'IN_PROGRESS'] } },
+                    // Pending/Confirmed are only shown if they are not stale
+                    {
+                        status: { in: ['PENDING', 'CONFIRMED'] },
+                        scheduledDate: { gte: expirationThreshold }
+                    }
+                ]
+            });
         }
 
         const [rooms, totalCount] = await Promise.all([

@@ -317,8 +317,9 @@ const createSession = async (userId, token, deviceName = null, platform = null, 
     orderBy: { lastActive: 'asc' }
   });
 
-  // 3. Enforce limit from .env
-  const maxSessions = parseInt(process.env.MAX_SESSIONS || '5');
+  // 3. Enforce limit from Admin Settings (Dynamic)
+  const maxSessionsSetting = await prisma.globalSettings.findUnique({ where: { key: 'MAX_SESSIONS' } });
+  const maxSessions = parseInt(maxSessionsSetting?.value || process.env.MAX_SESSIONS || '5');
   if (activeSessions.length >= maxSessions) {
     const err = new Error('Session limit reached. Please logout from other devices.');
     err.code = 'SESSION_LIMIT_REACHED';

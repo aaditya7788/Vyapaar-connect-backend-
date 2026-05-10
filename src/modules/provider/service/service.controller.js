@@ -100,6 +100,22 @@ const toggleStatus = async (req, res) => {
 };
 
 /**
+ * Toggle Sold Out status
+ */
+const toggleSoldOut = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user.id;
+        const service = await serviceService.toggleSoldOut(id, userId);
+        const isSoldOut = service.stock === 0;
+        return response.success(res, `Service marked as ${isSoldOut ? 'Sold Out' : 'Available'}`, service);
+    } catch (error) {
+        console.error('[SERVICE CONTROLLER ERROR (SOLD_OUT)]:', error);
+        return response.error(res, error.message || 'Failed to toggle sold out status');
+    }
+};
+
+/**
  * Get a single service by ID
  */
 const getServiceById = async (req, res) => {
@@ -122,6 +138,7 @@ module.exports = {
     updateService,
     deleteService,
     toggleStatus,
+    toggleSoldOut,
     checkAvailability,
     getServiceById
 };

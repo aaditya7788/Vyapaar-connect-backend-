@@ -36,6 +36,39 @@ const uploadSingle = async (req, res) => {
   }
 };
 
+const uploadMultiple = async (req, res) => {
+  try {
+    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No files uploaded' });
+    }
+
+    const { uploadMultipleToS3 } = require('../../../utils/s3Service');
+    const { normalizeUrl } = require('../booking/booking.notification');
+
+    // Determine folder
+    let folder = req.uploadFolder || 'common';
+    folder = folder.replace(/^uploads\//, '');
+
+    // Upload to S3 in batch
+    const relativePaths = await uploadMultipleToS3(req.files, folder);
+    
+    const results = relativePaths.map(path => ({
+      relativePath: path,
+      url: normalizeUrl(path)
+    }));
+
+    res.status(200).json({ 
+      status: 'success', 
+      message: `${results.length} files uploaded successfully`,
+      files: results
+    });
+  } catch (error) {
+    console.error('[MULTI-UPLOAD ERROR]:', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
 module.exports = {
-  uploadSingle
+  uploadSingle,
+  uploadMultiple
 };

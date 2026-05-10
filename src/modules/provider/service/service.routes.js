@@ -26,7 +26,12 @@ router.put('/:id', serviceController.updateService);
 /**
  * Update service status (active/inactive)
  */
-router.patch('/:id/status', serviceController.toggleStatus);
+router.patch('/:id/status', authMiddleware, serviceController.toggleStatus);
+
+/**
+ * Quick toggle sold-out status
+ */
+router.patch('/:id/toggle-sold-out', authMiddleware, serviceController.toggleSoldOut);
 
 /**
  * Delete a service

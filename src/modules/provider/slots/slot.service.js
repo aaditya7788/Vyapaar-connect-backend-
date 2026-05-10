@@ -69,7 +69,7 @@ class SlotService {
         // 0. Fetch Shop defaults
         const shop = await prisma.shop.findUnique({
             where: { id: shopId },
-            select: { workingDays: true, workingHoursStart: true, workingHoursEnd: true }
+            select: { category: true, workingDays: true, workingHoursStart: true, workingHoursEnd: true }
         });
 
         if (!shop) throw new Error('Shop not found');
@@ -145,7 +145,7 @@ class SlotService {
         }
 
         // 4. Generate slots
-        const slots = [];
+        const slotsMap = new Map();
         for (const window of activeWindows) {
             const windowStart = this._timeToMinutes(window.startTime);
             const windowEnd = this._timeToMinutes(window.endTime);
@@ -167,38 +167,98 @@ class SlotService {
                         const bEnd = this._timeToMinutes(b.endTime);
                         return t < bEnd && (t + duration) > bStart;
                     });
-                    slots.push({
-                        time: slotStart,
-                        endTime: slotEnd,
-                        displayRange: `${this._format24to12(slotStart)} - ${this._format24to12(slotEnd)}`,
-                        displayTime: this._format24to12(slotStart),
-                        status: 'break',
-                        label: matchingBreak?.label || 'Unavailable',
-                        remaining: 0,
-                        maxBookings: 0,
-                    });
+                    
+                    if (!slotsMap.has(slotStart)) {
+                        slotsMap.set(slotStart, {
+                            time: slotStart,
+                            endTime: slotEnd,
+                            displayRange: `${this._format24to12(slotStart)} - ${this._format24to12(slotEnd)}`,
+                            displayTime: this._format24to12(slotStart),
+                            status: 'break',
+                            label: matchingBreak?.label || 'Unavailable',
+                            remaining: 0,
+                            maxBookings: 0,
+                        });
+                    }
                     continue;
                 }
 
                 const booked = bookingCountByTime[slotStart] || 0;
                 const remaining = Math.max(0, window.maxBookings - booked);
 
-                slots.push({
-                    time: slotStart,
-                    endTime: slotEnd,
-                    displayRange: `${this._format24to12(slotStart)} - ${this._format24to12(slotEnd)}`,
-                    displayTime: this._format24to12(slotStart),
-                    status: remaining > 0 ? 'available' : 'full',
-                    remaining,
-                    maxBookings: window.maxBookings,
+                if (slotsMap.has(slotStart)) {
+                    const existing = slotsMap.get(slotStart);
+                    if (existing.status !== 'break') {
+                        existing.maxBookings += window.maxBookings;
+                        existing.remaining = Math.max(0, existing.maxBookings - booked);
+                        existing.status = existing.remaining > 0 ? 'available' : 'full';
+                    }
+                } else {
+                    slotsMap.set(slotStart, {
+                        time: slotStart,
+                        endTime: slotEnd,
+                        displayRange: `${this._format24to12(slotStart)} - ${this._format24to12(slotEnd)}`,
+                        displayTime: this._format24to12(slotStart),
+                        status: remaining > 0 ? 'available' : 'full',
+                        remaining,
+                        maxBookings: window.maxBookings,
+                    });
+                }
+            }
+        }
+
+        // 5. Apply Lead-Time Buffer (if date is today)
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD in UTC
+        
+        // Use a more robust today check (local date string)
+        const todayLocal = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+        const isToday = date === todayLocal;
+
+        if (isToday) {
+            // Fetch Buffer Setting (Priority: Category Model > Category Override Setting > Global Setting)
+            const categoryName = shop.category;
+            let bufferMin = 60; // Default fallback
+
+            if (categoryName) {
+                const categoryRecord = await prisma.category.findUnique({ 
+                    where: { name: categoryName },
+                    select: { bufferTimeMin: true }
                 });
+                
+                if (categoryRecord) {
+                    bufferMin = categoryRecord.bufferTimeMin;
+                } else {
+                    // Fallback to GlobalSettings naming convention
+                    const settings = await prisma.globalSettings.findMany({
+                        where: { key: { in: ['BOOKING_BUFFER_MIN', `BOOKING_BUFFER_MIN_${categoryName.toUpperCase()}`] } }
+                    });
+                    bufferMin = parseInt(
+                        settings.find(s => s.key === `BOOKING_BUFFER_MIN_${categoryName.toUpperCase()}`)?.value || 
+                        settings.find(s => s.key === 'BOOKING_BUFFER_MIN')?.value || 
+                        '60'
+                    );
+                }
+            }
+
+            const currentTimeInMinutes = (now.getHours() * 60) + now.getMinutes();
+            const earliestAllowedMinutes = currentTimeInMinutes + bufferMin;
+
+            for (const [time, slot] of slotsMap) {
+                const slotStartMinutes = this._timeToMinutes(time);
+                if (slotStartMinutes < earliestAllowedMinutes && slot.status === 'available') {
+                    // Force slot to be unavailable if within buffer
+                    slot.status = 'unavailable';
+                    slot.remaining = 0;
+                    slot.label = 'Too Close';
+                }
             }
         }
 
         return { 
             isClosed: false, 
             isHoliday,
-            slots 
+            slots: Array.from(slotsMap.values()).sort((a, b) => a.time.localeCompare(b.time))
         };
     }
 

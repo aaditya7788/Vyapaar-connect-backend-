@@ -36,6 +36,12 @@ router.patch('/home/subcategories/:id/visibility', authMiddleware, adminMiddlewa
 router.get('/shops', authMiddleware, adminMiddleware, adminController.getShopsForAdmin);
 
 /**
+ * @route   GET /api/admin/shops/all
+ * @desc    Get all shops with freeze status + provider info for Shop Moderation screen
+ */
+router.get('/shops/all', authMiddleware, adminMiddleware, adminController.getAllShopsForAdmin);
+
+/**
  * @route   GET /api/admin/services
  * @desc    Get all services for linking
  */
@@ -64,5 +70,19 @@ router.patch('/ads/:id', authMiddleware, adminMiddleware, adminController.update
  * @desc    Delete an advertisement
  */
 router.delete('/ads/:id', authMiddleware, adminMiddleware, adminController.deleteAd);
+
+/**
+ * @route   POST /api/admin/shops/:id/freeze
+ * @desc    Freeze or unfreeze a specific shop (sends FCM to provider)
+ */
+router.post('/shops/:id/freeze', authMiddleware, adminMiddleware, adminController.freezeShop);
+
+/**
+ * @route   PATCH /api/admin/shops/:id/status
+ * @desc    Verify or Reject a shop application
+ */
+router.patch('/shops/:id/status', authMiddleware, adminMiddleware, adminController.updateShopStatus);
+
+router.patch('/providers/:id/status', authMiddleware, adminMiddleware, adminController.updateProviderStatus);
 
 module.exports = router;

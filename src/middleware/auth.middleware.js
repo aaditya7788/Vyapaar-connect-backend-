@@ -103,11 +103,82 @@ const requireRole = (requiredRole) => {
   };
 };
 
+/**
+ * Specialized Provider Middleware
+ * Runs full auth check THEN verifies the provider profile is active.
+ * Use this as a drop-in replacement for authMiddleware on provider routes.
+ */
+const providerMiddleware = async (req, res, next) => {
+  try {
+    // Step 1: Authenticate (same as authMiddleware)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ status: 'error', message: 'No access token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, env.ACCESS_TOKEN_SECRET);
+
+    if (decoded.type !== 'access') {
+      return res.status(403).json({ status: 'error', message: 'Invalid token type' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: { refreshTokens: true }
+    });
+
+    if (!user || user.status !== 'active') {
+      const isBlocked = user?.status === 'blocked';
+      return res.status(403).json({
+        status: 'error',
+        code: isBlocked ? 'ACCOUNT_BLOCKED' : 'ACCOUNT_RESTRICTED',
+        message: isBlocked ? (user.blockReason || 'Your account has been blocked.') : 'Account restricted',
+      });
+    }
+
+    if (decoded.sessionId) {
+      const isSessionActive = user.refreshTokens.some(s => s.id === decoded.sessionId);
+      if (!isSessionActive) {
+        return res.status(401).json({ status: 'error', code: 'SESSION_EXPIRED', message: 'Session expired' });
+      }
+    }
+
+    req.user = user;
+    req.sessionId = decoded.sessionId;
+    req.decoded = decoded;
+
+    // Step 2: Check provider role
+    if (!user.roles.includes('provider')) {
+      return res.status(403).json({ status: 'error', message: 'Provider role required' });
+    }
+
+    // Step 3: Check provider profile is active (freeze check)
+    const providerProfile = await prisma.providerProfile.findUnique({
+      where: { userId: user.id }
+    });
+
+    if (!providerProfile || !providerProfile.isActive) {
+      return res.status(403).json({
+        status: 'error',
+        code: 'PROVIDER_FROZEN',
+        message: 'Your provider profile is currently frozen or inactive. Please contact support.'
+      });
+    }
+
+    req.providerProfile = providerProfile;
+    next();
+  } catch (error) {
+    return res.status(401).json({ status: 'error', message: 'Invalid or expired access token' });
+  }
+};
+
 const adminMiddleware = requireRole('admin');
 
 module.exports = {
   authMiddleware,
   optionalAuthMiddleware,
   requireRole,
+  providerMiddleware,
   adminMiddleware,
 };

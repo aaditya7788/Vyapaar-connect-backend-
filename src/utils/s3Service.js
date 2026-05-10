@@ -92,7 +92,22 @@ const deleteFromS3 = async (fileUrl) => {
   }
 };
 
+const uploadMultipleToS3 = async (files, folder = 'common') => {
+  if (!files || !Array.isArray(files) || files.length === 0) return [];
+  
+  try {
+    const uploadPromises = files.map(file => 
+      uploadToS3(file.buffer, file.originalname || 'image.jpg', folder, file.mimetype)
+    );
+    return await Promise.all(uploadPromises);
+  } catch (error) {
+    console.error('[S3] Batch Upload Failed:', error.message);
+    throw new Error('Failed to upload images to cloud storage');
+  }
+};
+
 module.exports = {
   uploadToS3,
+  uploadMultipleToS3,
   deleteFromS3
 };

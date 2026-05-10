@@ -339,6 +339,14 @@ const getShopById = async (shopId, userId = null) => {
   });
   if (!shop) throw new Error('Shop not found');
 
+  // Admin Enforcement: Block access to frozen shops in real-time
+  if (shop.isFrozen) {
+    const err = new Error('This shop is currently frozen by administration and is unavailable.');
+    err.status = 403;
+    err.code = 'SHOP_FROZEN';
+    throw err;
+  }
+
   // Attach Category Settings for Admin Control (Phase 13)
   if (shop.category) {
     const categoryName = shop.category.trim();
@@ -526,13 +534,22 @@ async function getProviderDashboardStats(userId, shopId) {
     },
   });
 
-  // Count Active Jobs (Confirmed, Arrived, In Progress)
+  // Count Active Jobs (Confirmed, Arrived, In Progress) FOR TODAY
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const endOfToday = new Date();
+  endOfToday.setUTCHours(23, 59, 59, 999);
+
   const activeJobsCount = await prisma.booking.count({
     where: {
       shopId,
       status: {
         in: ['CONFIRMED', 'ARRIVED', 'IN_PROGRESS'],
       },
+      scheduledDate: {
+        gte: startOfToday,
+        lte: endOfToday,
+      }
     },
   });
 

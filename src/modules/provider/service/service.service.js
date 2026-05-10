@@ -49,6 +49,7 @@ const CLEAN_DATA = async (data) => {
         inclusions: data.inclusions,
         isActive: data.isActive !== undefined ? data.isActive : data.isAvailable,
         image: data.image,
+        gallery: Array.isArray(data.gallery) ? data.gallery : [],
         shopId: data.shopId,
     };
     
@@ -70,8 +71,7 @@ const createService = async (serviceData) => {
         data.configurableInclusions = {
             create: configurableInclusions.map(inc => ({
                 name: inc.name,
-                price: parseFloat(inc.price || 0),
-                isRequired: !!inc.isRequired
+                price: parseFloat(inc.price || 0)
             }))
         };
     }
@@ -118,7 +118,27 @@ const getServicesByShop = async (shopId, requestingUserId = null) => {
         orderBy: { name: 'asc' }
     });
     
-    return services.map(mapServiceCategories);
+    // Fetch all categories to join settings (Prisma doesn't support easy join on non-relation string field)
+    const categoryNames = [...new Set(services.map(s => s.category).filter(Boolean))];
+    const categorySettings = await prisma.category.findMany({
+        where: { name: { in: categoryNames } }
+    });
+
+    const mapped = services.map(srv => {
+        const settings = categorySettings.find(c => c.name === srv.category);
+        return {
+            ...mapServiceCategories(srv),
+            categorySettings: settings ? {
+                supportsQuantity: settings.supportsQuantity,
+                supportsDailyMenu: settings.supportsDailyMenu,
+                supportsInclusions: settings.supportsInclusions,
+                supportsGallery: settings.supportsGallery,
+                isAppointmentBased: settings.isAppointmentBased
+            } : null
+        };
+    });
+
+    return mapped;
 };
 
 /**
@@ -129,7 +149,22 @@ const getServiceById = async (id) => {
         where: { id },
         include: { configurableInclusions: true }
     });
-    return mapServiceCategories(service);
+    if (!service) return null;
+
+    const categorySettings = await prisma.category.findFirst({
+        where: { name: service.category }
+    });
+
+    return {
+        ...mapServiceCategories(service),
+        categorySettings: categorySettings ? {
+            supportsQuantity: categorySettings.supportsQuantity,
+            supportsDailyMenu: categorySettings.supportsDailyMenu,
+            supportsInclusions: categorySettings.supportsInclusions,
+            supportsGallery: categorySettings.supportsGallery,
+            isAppointmentBased: categorySettings.isAppointmentBased
+        } : null
+    };
 };
 
 /**
@@ -150,8 +185,7 @@ const updateService = async (id, serviceData) => {
         data.configurableInclusions = {
             create: configurableInclusions.map(inc => ({
                 name: inc.name,
-                price: parseFloat(inc.price || 0),
-                isRequired: !!inc.isRequired
+                price: parseFloat(inc.price || 0)
             }))
         };
     }
@@ -222,11 +256,40 @@ const checkAvailability = async (serviceIds) => {
         },
         select: {
             id: true,
-            isActive: true
+            isActive: true,
+            stock: true
         }
     });
 
     return services;
+};
+
+/**
+ * Toggle Sold Out status (Stock to 0 or back to default)
+ */
+const toggleSoldOut = async (id, userId) => {
+    const service = await prisma.service.findFirst({
+        where: {
+            id,
+            shop: {
+                providerProfile: {
+                    userId
+                }
+            }
+        }
+    });
+
+    if (!service) throw new Error('Service not found or unauthorized');
+
+    // Toggle: If 0 -> -1 (Unlimited), If not 0 -> 0 (Sold Out)
+    const newStock = service.stock === 0 ? -1 : 0;
+
+    const updated = await prisma.service.update({
+        where: { id },
+        data: { stock: newStock }
+    });
+    
+    return mapServiceCategories(updated);
 };
 
 module.exports = {
@@ -236,5 +299,6 @@ module.exports = {
     updateService,
     deleteService,
     toggleServiceStatus,
+    toggleSoldOut,
     checkAvailability
 };

@@ -99,6 +99,15 @@ const getShopsForAdmin = async (req, res) => {
   }
 };
 
+const getAllShopsForAdmin = async (req, res) => {
+  try {
+    const shops = await adminService.listShopsForAdmin(req.query);
+    res.status(200).json({ status: 'success', data: shops });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 const getServicesForAdmin = async (req, res) => {
   try {
     const services = await adminService.listServices();
@@ -119,6 +128,31 @@ const freezeShop = async (req, res) => {
   }
 };
 
+const updateProviderStatus = async (req, res) => {
+  try {
+    const { id } = req.params; // providerProfile id
+    const { isActive } = req.body;
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ status: 'fail', message: 'isActive (boolean) is required' });
+    }
+    const profile = await adminService.setProviderActiveStatus(id, isActive);
+    res.status(200).json({ status: 'success', data: profile });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const updateShopStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, rejectionReason } = req.body;
+    const shop = await adminService.updateShopStatus(id, { status, rejectionReason });
+    res.status(200).json({ status: 'success', data: shop });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 module.exports = {
   getHomeCategories,
   updateCategoriesOrder,
@@ -130,6 +164,9 @@ module.exports = {
   updateAd,
   deleteAd,
   getShopsForAdmin,
+  getAllShopsForAdmin,
   getServicesForAdmin,
-  freezeShop
+  freezeShop,
+  updateProviderStatus,
+  updateShopStatus
 };

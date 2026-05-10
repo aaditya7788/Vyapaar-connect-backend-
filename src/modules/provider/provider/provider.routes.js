@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const providerController = require('./provider.controller');
-const { authMiddleware, optionalAuthMiddleware } = require('../../../middleware/auth.middleware');
+const { authMiddleware, optionalAuthMiddleware, providerMiddleware } = require('../../../middleware/auth.middleware');
 
 /**
  * @route   POST /api/provider/onboard
@@ -15,27 +15,27 @@ router.post('/onboard', authMiddleware, providerController.onboard);
  * @desc    Add a new shop for existing provider
  * @access  Private (Access Token)
  */
-router.post('/shops', authMiddleware, providerController.addShop);
+router.post('/shops', providerMiddleware, providerController.addShop);
 
 /**
  * @route   PATCH /api/provider/shops/:id/status
  */
-router.patch('/shops/:id/status', authMiddleware, providerController.updateShopStatus);
+router.patch('/shops/:id/status', providerMiddleware, providerController.updateShopStatus);
 
 /**
  * @route   PUT /api/provider/shops/:id
  */
-router.put('/shops/:id', authMiddleware, providerController.updateShop);
+router.put('/shops/:id', providerMiddleware, providerController.updateShop);
 
 /**
  * @route   GET /api/provider/shops
  */
-router.get('/shops', authMiddleware, providerController.listShops);
+router.get('/shops', providerMiddleware, providerController.listShops);
 
 /**
  * @route   DELETE /api/provider/shops/:id
  */
-router.delete('/shops/:id', authMiddleware, providerController.deleteShop);
+router.delete('/shops/:id', providerMiddleware, providerController.deleteShop);
 
 /**
  * @route   GET /api/provider/shops/:id
@@ -45,12 +45,12 @@ router.get('/shops/:id', optionalAuthMiddleware, providerController.getShopById)
 /**
  * @route   GET /api/provider/dashboard/:id
  */
-router.get('/dashboard/:id', authMiddleware, providerController.getDashboard);
+router.get('/dashboard/:id', providerMiddleware, providerController.getDashboard);
 
 /**
  * Gallery Management — Granular Updates
  */
-router.post('/shops/:id/gallery', authMiddleware, providerController.addGalleryImage);
-router.delete('/shops/:id/gallery', authMiddleware, providerController.removeGalleryImage);
+router.post('/shops/:id/gallery', providerMiddleware, providerController.addGalleryImage);
+router.delete('/shops/:id/gallery', providerMiddleware, providerController.removeGalleryImage);
 
 module.exports = router;
