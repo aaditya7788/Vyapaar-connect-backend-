@@ -320,15 +320,6 @@ const getShopById = async (shopId, userId = null) => {
           }
         }
       },
-      reviews: {
-        take: 10,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: { fullName: true, avatar: true }
-          }
-        }
-      },
       ...(userId ? {
         recommendations: {
           where: { userId },
@@ -474,7 +465,53 @@ module.exports = {
   getProviderDashboardStats,
   addGalleryImage,
   removeGalleryImage,
+  getShopServices,
+  getShopReviews,
 };
+
+/**
+ * Fetch all services for a specific shop
+ */
+async function getShopServices(shopId) {
+  return await prisma.service.findMany({
+    where: { shopId, isActive: true },
+    orderBy: { createdAt: 'desc' }
+  });
+}
+
+/**
+ * Fetch paginated reviews for a specific shop
+ */
+async function getShopReviews(shopId, page = 1, limit = 10) {
+  const pageNum = Number(page) || 1;
+  const limitNum = Number(limit) || 10;
+  const skip = (pageNum - 1) * limitNum;
+  
+  const [reviews, total] = await Promise.all([
+    prisma.review.findMany({
+      where: { shopId },
+      include: {
+        user: {
+          select: { fullName: true, avatar: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limitNum,
+    }),
+    prisma.review.count({ where: { shopId } })
+  ]);
+
+  return {
+    reviews,
+    pagination: {
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum)
+    }
+  };
+}
 
 /**
  * Get aggregated dashboard stats for a specific shop

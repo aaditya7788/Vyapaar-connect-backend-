@@ -104,6 +104,27 @@ const removeGalleryImage = async (req, res) => {
   }
 };
 
+const getShopServices = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const services = await providerService.getShopServices(id);
+    res.status(200).json({ status: 'success', data: services });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const getShopReviews = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { page, limit } = req.query;
+    const result = await providerService.getShopReviews(id, page, limit);
+    res.status(200).json({ status: 'success', data: result.reviews, pagination: result.pagination });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 module.exports = {
   onboard,
   addShop,
@@ -115,4 +136,6 @@ module.exports = {
   getDashboard,
   addGalleryImage,
   removeGalleryImage,
+  getShopServices,
+  getShopReviews,
 };

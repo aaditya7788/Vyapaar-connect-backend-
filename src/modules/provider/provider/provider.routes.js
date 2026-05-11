@@ -43,6 +43,16 @@ router.delete('/shops/:id', providerMiddleware, providerController.deleteShop);
 router.get('/shops/:id', optionalAuthMiddleware, providerController.getShopById);
 
 /**
+ * @route   GET /api/provider/shops/:id/services
+ */
+router.get('/shops/:id/services', optionalAuthMiddleware, providerController.getShopServices);
+
+/**
+ * @route   GET /api/provider/shops/:id/reviews
+ */
+router.get('/shops/:id/reviews', optionalAuthMiddleware, providerController.getShopReviews);
+
+/**
  * @route   GET /api/provider/dashboard/:id
  */
 router.get('/dashboard/:id', providerMiddleware, providerController.getDashboard);
