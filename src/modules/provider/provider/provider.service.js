@@ -352,6 +352,12 @@ const getShopById = async (shopId, userId = null) => {
     if (categorySettings) {
       shop.categorySettings = {
         supportsQuantity: categorySettings.supportsQuantity,
+        supportsInclusions: categorySettings.supportsInclusions,
+        supportsDailyMenu: categorySettings.supportsDailyMenu,
+        isAppointmentBased: categorySettings.isAppointmentBased,
+        supportsGallery: categorySettings.supportsGallery,
+        startOtpRequired: categorySettings.startOtpRequired,
+        bufferTimeMin: categorySettings.bufferTimeMin,
         mascotImage: categorySettings.mascotImage
       };
     }
@@ -473,9 +479,30 @@ module.exports = {
  * Fetch all services for a specific shop
  */
 async function getShopServices(shopId) {
-  return await prisma.service.findMany({
+  const services = await prisma.service.findMany({
     where: { shopId, isActive: true },
     orderBy: { createdAt: 'desc' }
+  });
+
+  if (services.length === 0) return [];
+
+  // Enrichment Logic (Consistent with service.service.js)
+  const categoryNames = [...new Set(services.map(s => s.category).filter(Boolean))];
+  const catSettings = await prisma.category.findMany({
+      where: { name: { in: categoryNames } }
+  });
+
+  return services.map(srv => {
+      const setting = catSettings.find(c => c.name === srv.category);
+      return {
+          ...srv,
+          supportsQuantity: setting?.supportsQuantity || false,
+          categorySettings: setting ? {
+              supportsQuantity: setting.supportsQuantity,
+              supportsInclusions: setting.supportsInclusions,
+              isAppointmentBased: setting.isAppointmentBased
+          } : null
+      };
   });
 }
 

@@ -54,7 +54,8 @@ const getHomeFeed = async () => {
                 services: {
                     some: {
                         isFeatured: true,
-                        isActive: true
+                        isActive: true,
+                        stock: { not: 0 }
                     }
                 }
             },
@@ -63,7 +64,8 @@ const getHomeFeed = async () => {
                 services: {
                     where: {
                         isFeatured: true,
-                        isActive: true
+                        isActive: true,
+                        stock: { not: 0 }
                     },
                     take: 1
                 }
@@ -84,13 +86,19 @@ const getHomeFeed = async () => {
                     user: { status: 'active' }
                 },
                 services: {
-                    some: { isActive: true }
+                    some: { 
+                        isActive: true,
+                        stock: { not: 0 }
+                    }
                 }
             },
             include: {
                 community: true,
                 services: {
-                    where: { isActive: true },
+                    where: { 
+                        isActive: true,
+                        stock: { not: 0 }
+                    },
                     take: 2
                 }
             },
@@ -101,11 +109,41 @@ const getHomeFeed = async () => {
         })
     ]);
 
+    // 2. Surgical Category Enrichment (Home Feed)
+    const allServices = [
+        ...featuredShops.flatMap(s => s.services || []),
+        ...trendingShops.flatMap(s => s.services || [])
+    ];
+    const categoryNames = [...new Set(allServices.map(s => s.category).filter(Boolean))];
+    const catSettings = await prisma.category.findMany({
+        where: { name: { in: categoryNames } }
+    });
+
+    const enrichService = (srv) => {
+        const setting = catSettings.find(c => c.name === srv.category);
+        return {
+            ...srv,
+            supportsQuantity: setting?.supportsQuantity || false,
+            categorySettings: setting ? {
+                supportsQuantity: setting.supportsQuantity,
+                supportsInclusions: setting.supportsInclusions,
+                isAppointmentBased: setting.isAppointmentBased
+            } : null
+        };
+    };
+
+    featuredShops.forEach(shop => {
+        if (shop.services) shop.services = shop.services.map(enrichService);
+    });
+    trendingShops.forEach(shop => {
+        if (shop.services) shop.services = shop.services.map(enrichService);
+    });
+
     return {
         banners: activeAds,
         categories,
-        trendingShops,
-        featuredShops
+        featuredShops,
+        trendingShops
     };
 };
 
@@ -142,7 +180,8 @@ const searchDiscovery = async (filters, userId = null) => {
         }
     };
     const whereService = { 
-        isActive: true, 
+        isActive: true,
+        stock: { not: 0 }, // Filter out sold out items
         shop: { 
             status: 'VERIFIED',
             isFrozen: false,
@@ -219,7 +258,10 @@ const searchDiscovery = async (filters, userId = null) => {
             include: {
                 community: true,
                 services: { 
-                    where: { isActive: true }, 
+                    where: { 
+                        isActive: true,
+                        stock: { not: 0 }
+                    }, 
                     take: 2,
                     include: { 
                         configurableInclusions: true
@@ -271,9 +313,11 @@ const searchDiscovery = async (filters, userId = null) => {
                     ...srv,
                     is_inclusion: srvSetting?.supportsInclusions || false,
                     supportsQuantity: srvSetting?.supportsQuantity || false,
-                    categorySettings: {
-                        isAppointmentBased: srvSetting?.isAppointmentBased || false
-                    }
+                    categorySettings: srvSetting ? {
+                        supportsQuantity: srvSetting.supportsQuantity,
+                        supportsInclusions: srvSetting.supportsInclusions,
+                        isAppointmentBased: srvSetting.isAppointmentBased
+                    } : null
                 };
             });
         }
@@ -282,9 +326,11 @@ const searchDiscovery = async (filters, userId = null) => {
             ...item,
             is_inclusion: isModular,
             supportsQuantity: canSupportQty,
-            categorySettings: {
-                isAppointmentBased: isAppointment
-            }
+            categorySettings: setting ? {
+                supportsQuantity: setting.supportsQuantity,
+                supportsInclusions: setting.supportsInclusions,
+                isAppointmentBased: setting.isAppointmentBased
+            } : null
         };
     });
 
@@ -541,7 +587,8 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
         services = await prisma.service.findMany({
             where: {
                 shopId: { in: shopIds },
-                isActive: true
+                isActive: true,
+                stock: { not: 0 }
             },
             include: {
                 shop: {
@@ -583,7 +630,8 @@ const getHomeServices = async (lat, lng, radiusKm = 10) => {
                 categorySettings: {
                     isAppointmentBased: cat.isAppointmentBased || false,
                     supportsDailyMenu: cat.supportsDailyMenu || false,
-                    supportsInclusions: cat.supportsInclusions || false
+                    supportsInclusions: cat.supportsInclusions || false,
+                    supportsQuantity: cat.supportsQuantity || false
                 }
             };
         }).filter(srv => {

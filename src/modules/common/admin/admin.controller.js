@@ -153,6 +153,37 @@ const updateShopStatus = async (req, res) => {
   }
 };
 
+const toggleReviewVisibility = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isPublic } = req.body;
+    const review = await adminService.updateReviewVisibility(id, isPublic);
+    res.status(200).json({ status: 'success', data: review });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const getShopBookings = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await adminService.getShopBookingsForAdmin(id, req.query);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const removeReview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await adminService.removeReview(id);
+    res.status(200).json({ status: 'success', message: 'Review deleted' });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 module.exports = {
   getHomeCategories,
   updateCategoriesOrder,
@@ -166,7 +197,10 @@ module.exports = {
   getShopsForAdmin,
   getAllShopsForAdmin,
   getServicesForAdmin,
+  getShopBookings,
   freezeShop,
   updateProviderStatus,
-  updateShopStatus
+  updateShopStatus,
+  toggleReviewVisibility,
+  removeReview
 };

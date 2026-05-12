@@ -34,6 +34,11 @@ router.patch('/:id/status', authMiddleware, serviceController.toggleStatus);
 router.patch('/:id/toggle-sold-out', authMiddleware, serviceController.toggleSoldOut);
 
 /**
+ * Get single service detail
+ */
+router.get('/:id', serviceController.getServiceById);
+
+/**
  * Delete a service
  */
 router.delete('/:id', serviceController.deleteService);

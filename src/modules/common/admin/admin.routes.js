@@ -33,13 +33,14 @@ router.patch('/home/subcategories/:id/visibility', authMiddleware, adminMiddlewa
  * @route   GET /api/admin/shops
  * @desc    Get all shops for linking
  */
-router.get('/shops', authMiddleware, adminMiddleware, adminController.getShopsForAdmin);
+router.get('/shops', authMiddleware, adminMiddleware, adminController.getAllShopsForAdmin);
 
 /**
  * @route   GET /api/admin/shops/all
  * @desc    Get all shops with freeze status + provider info for Shop Moderation screen
  */
 router.get('/shops/all', authMiddleware, adminMiddleware, adminController.getAllShopsForAdmin);
+router.get('/shops/:id/bookings', authMiddleware, adminMiddleware, adminController.getShopBookings);
 
 /**
  * @route   GET /api/admin/services
@@ -84,5 +85,9 @@ router.post('/shops/:id/freeze', authMiddleware, adminMiddleware, adminControlle
 router.patch('/shops/:id/status', authMiddleware, adminMiddleware, adminController.updateShopStatus);
 
 router.patch('/providers/:id/status', authMiddleware, adminMiddleware, adminController.updateProviderStatus);
+
+// Review Moderation
+router.patch('/reviews/:id/visibility', authMiddleware, adminMiddleware, adminController.toggleReviewVisibility);
+router.delete('/reviews/:id', authMiddleware, adminMiddleware, adminController.removeReview);
 
 module.exports = router;

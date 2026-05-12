@@ -124,32 +124,52 @@ const listShops = async () => {
  * Full Admin Shops List (with freeze status + provider info)
  */
 const listShopsForAdmin = async (params = {}) => {
-    const { search } = params;
+    const { search, page = 1, limit = 10 } = params;
+    const skip = (Number(page) - 1) * Number(limit);
+    const take = Number(limit);
+
     const where = search ? {
         OR: [
             { name: { contains: search, mode: 'insensitive' } },
             { category: { contains: search, mode: 'insensitive' } }
         ]
     } : {};
-    return await prisma.shop.findMany({
-        where,
-        select: {
-            id: true,
-            name: true,
-            category: true,
-            status: true,
-            isFrozen: true,
-            providerProfile: {
-                select: {
-                    id: true,
-                    isActive: true,
-                    user: { select: { id: true, fullName: true, phone: true } }
+
+    const [shops, total] = await Promise.all([
+        prisma.shop.findMany({
+            where,
+            select: {
+                id: true,
+                name: true,
+                category: true,
+                status: true,
+                isFrozen: true,
+                updatedAt: true,
+                _count: { select: { services: true } },
+                providerProfile: {
+                    select: {
+                        id: true,
+                        isActive: true,
+                        user: { select: { id: true, fullName: true, phone: true } }
+                    }
                 }
-            }
-        },
-        orderBy: [{ isFrozen: 'desc' }, { updatedAt: 'desc' }],
-        take: 200
-    });
+            },
+            orderBy: [{ isFrozen: 'desc' }, { updatedAt: 'desc' }],
+            skip,
+            take
+        }),
+        prisma.shop.count({ where })
+    ]);
+
+    return {
+        data: shops,
+        pagination: {
+            total,
+            page: Number(page),
+            limit: Number(limit),
+            totalPages: Math.ceil(total / limit)
+        }
+    };
 };
 
 /**
@@ -286,5 +306,50 @@ module.exports = {
     listServices,
     setShopFreezeStatus,
     setProviderActiveStatus,
-    updateShopStatus
+    updateShopStatus,
+    updateReviewVisibility: async (id, isPublic) => {
+        return await prisma.review.update({
+            where: { id },
+            data: { isPublic }
+        });
+    },
+    removeReview: async (id) => {
+        return await prisma.review.delete({
+            where: { id }
+        });
+    },
+    getShopBookingsForAdmin: async (shopId, params = {}) => {
+        const { page = 1, limit = 10, status } = params;
+        const skip = (Number(page) - 1) * Number(limit);
+        const take = Number(limit);
+
+        const where = { shopId };
+        if (status && status !== 'All') {
+            where.status = status;
+        }
+
+        const [bookings, total] = await Promise.all([
+            prisma.booking.findMany({
+                where,
+                include: {
+                    user: { select: { fullName: true, phone: true, avatar: true } },
+                    items: { include: { service: true } }
+                },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take
+            }),
+            prisma.booking.count({ where })
+        ]);
+
+        return {
+            data: bookings,
+            pagination: {
+                total,
+                page: Number(page),
+                limit: Number(limit),
+                totalPages: Math.ceil(total / limit)
+            }
+        };
+    }
 };

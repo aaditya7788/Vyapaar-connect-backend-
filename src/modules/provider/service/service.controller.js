@@ -31,6 +31,13 @@ const getShopServices = async (req, res) => {
         }
 
         const services = await serviceService.getServicesByShop(shopId, req.user?.id);
+        
+        console.log(`[BACKEND SHOP SERVICES] Shop ${shopId}:`, {
+            count: services.length,
+            firstService: services[0]?.name,
+            firstServiceSettings: services[0]?.categorySettings
+        });
+
         return response.success(res, 'Services fetched successfully', services);
     } catch (error) {
         console.error('[SERVICE CONTROLLER ERROR (FETCH)]:', error);
@@ -125,6 +132,13 @@ const getServiceById = async (req, res) => {
         if (!service) {
             return response.error(res, 'Service not found', 'NOT_FOUND', 404);
         }
+        
+        console.log(`[BACKEND SERVICE DETAIL] ${service.name}:`, {
+            category: service.category,
+            hasSettings: !!service.categorySettings,
+            settings: service.categorySettings
+        });
+
         return response.success(res, 'Service fetched successfully', service);
     } catch (error) {
         console.error('[SERVICE CONTROLLER ERROR (DETAIL)]:', error);

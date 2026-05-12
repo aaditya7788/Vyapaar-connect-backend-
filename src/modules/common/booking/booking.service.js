@@ -625,6 +625,11 @@ class BookingService {
                 throw new Error(`Booking failed: The following services are currently unavailable: ${names}. Please remove them from your cart.`);
             }
 
+            console.log(`[Booking Debug] Requested Services:`, services.map(s => s.serviceId));
+            console.log(`[Booking Debug] Found in DB:`, dbServices.map(s => s.id));
+            console.log(`[Booking Debug] Requested Shop:`, shopId);
+            console.log(`[Booking Debug] DB Service Shops:`, dbServices.map(s => s.shopId));
+
             if (dbServices.length !== services.length) {
                 throw new Error('Booking failed: Some selected services no longer exist. Please refresh your cart.');
             }
