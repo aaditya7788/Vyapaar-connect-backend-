@@ -48,6 +48,11 @@ const CLEAN_DATA = async (data) => {
         subcategories: subcategories || [],
         inclusions: data.inclusions,
         isActive: data.isActive !== undefined ? data.isActive : data.isAvailable,
+        dailyMenu: data.dailyMenu,
+        unit: data.unit,
+        stock: data.stock !== undefined ? parseInt(data.stock) : undefined,
+        minQuantity: data.minQuantity !== undefined ? parseInt(data.minQuantity) : undefined,
+        maxQuantity: data.maxQuantity !== undefined ? parseInt(data.maxQuantity) : undefined,
         image: data.image,
         gallery: Array.isArray(data.gallery) ? data.gallery : [],
         shopId: data.shopId,
@@ -55,6 +60,20 @@ const CLEAN_DATA = async (data) => {
     
     // Remove undefined fields
     Object.keys(cleaned).forEach(key => cleaned[key] === undefined && delete cleaned[key]);
+
+    // Register unit if it's new (unverified)
+    if (cleaned.unit) {
+        try {
+            await prisma.serviceUnit.upsert({
+                where: { name: cleaned.unit },
+                update: {},
+                create: { name: cleaned.unit, isVerified: false }
+            });
+        } catch (e) {
+            // Ignore unique constraint errors
+        }
+    }
+
     return cleaned;
 };
 
@@ -292,6 +311,24 @@ const toggleSoldOut = async (id, userId) => {
     return mapServiceCategories(updated);
 };
 
+/**
+ * Get all unique units currently used by services
+ */
+const getUniqueUnits = async () => {
+    const units = await prisma.serviceUnit.findMany({
+        where: { isVerified: true },
+        select: { name: true },
+        orderBy: { name: 'asc' }
+    });
+    
+    // Default units to always include if table is empty
+    const defaultUnits = ['pcs', 'kg', 'gm', 'ltr', 'ml', 'packet', 'plate', 'hour', 'session'];
+    const dbUnits = units.map(u => u.name);
+    
+    // Combine and remove duplicates
+    return [...new Set([...defaultUnits, ...dbUnits])].sort();
+};
+
 module.exports = {
     createService,
     getServicesByShop,
@@ -300,5 +337,6 @@ module.exports = {
     deleteService,
     toggleServiceStatus,
     toggleSoldOut,
-    checkAvailability
+    checkAvailability,
+    getUniqueUnits
 };

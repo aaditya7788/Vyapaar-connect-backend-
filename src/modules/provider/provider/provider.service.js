@@ -350,7 +350,7 @@ const getShopById = async (shopId, userId = null) => {
       }
     });
     if (categorySettings) {
-      shop.categorySettings = {
+        shop.categorySettings = {
         supportsQuantity: categorySettings.supportsQuantity,
         supportsInclusions: categorySettings.supportsInclusions,
         supportsDailyMenu: categorySettings.supportsDailyMenu,
@@ -500,7 +500,9 @@ async function getShopServices(shopId) {
           categorySettings: setting ? {
               supportsQuantity: setting.supportsQuantity,
               supportsInclusions: setting.supportsInclusions,
-              isAppointmentBased: setting.isAppointmentBased
+              isAppointmentBased: setting.isAppointmentBased,
+              supportsDailyMenu: setting.supportsDailyMenu,
+              supportsGallery: setting.supportsGallery
           } : null
       };
   });

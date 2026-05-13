@@ -12,6 +12,7 @@ router.get('/shop/:shopId', optionalAuthMiddleware, serviceController.getShopSer
  * Check multiple services' availability status
  */
 router.post('/availability', serviceController.checkAvailability);
+router.get('/meta/units', serviceController.getServiceUnits);
 
 /**
  * Create a new service

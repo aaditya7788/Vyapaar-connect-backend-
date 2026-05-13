@@ -146,6 +146,19 @@ const getServiceById = async (req, res) => {
     }
 };
 
+/**
+ * Get all available service units
+ */
+const getServiceUnits = async (req, res) => {
+    try {
+        const units = await serviceService.getUniqueUnits();
+        return response.success(res, 'Units fetched successfully', units);
+    } catch (error) {
+        console.error('[SERVICE CONTROLLER ERROR (UNITS)]:', error);
+        return response.error(res, 'Failed to fetch units');
+    }
+};
+
 module.exports = {
     createService,
     getShopServices,
@@ -154,5 +167,6 @@ module.exports = {
     toggleStatus,
     toggleSoldOut,
     checkAvailability,
-    getServiceById
+    getServiceById,
+    getServiceUnits
 };

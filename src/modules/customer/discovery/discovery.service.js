@@ -127,7 +127,9 @@ const getHomeFeed = async () => {
             categorySettings: setting ? {
                 supportsQuantity: setting.supportsQuantity,
                 supportsInclusions: setting.supportsInclusions,
-                isAppointmentBased: setting.isAppointmentBased
+                isAppointmentBased: setting.isAppointmentBased,
+                supportsDailyMenu: setting.supportsDailyMenu,
+                supportsGallery: setting.supportsGallery
             } : null
         };
     };
@@ -296,7 +298,14 @@ const searchDiscovery = async (filters, userId = null) => {
     const categoryNames = [...new Set(mixed.map(m => m.category).filter(Boolean))];
     const catSettings = await prisma.category.findMany({
         where: { name: { in: categoryNames } },
-        select: { name: true, supportsInclusions: true, supportsQuantity: true, isAppointmentBased: true }
+        select: { 
+            name: true, 
+            supportsInclusions: true, 
+            supportsQuantity: true, 
+            isAppointmentBased: true,
+            supportsDailyMenu: true,
+            supportsGallery: true
+        }
     });
 
     mixed = mixed.map(item => {
@@ -316,7 +325,9 @@ const searchDiscovery = async (filters, userId = null) => {
                     categorySettings: srvSetting ? {
                         supportsQuantity: srvSetting.supportsQuantity,
                         supportsInclusions: srvSetting.supportsInclusions,
-                        isAppointmentBased: srvSetting.isAppointmentBased
+                        isAppointmentBased: srvSetting.isAppointmentBased,
+                        supportsDailyMenu: srvSetting.supportsDailyMenu,
+                        supportsGallery: srvSetting.supportsGallery
                     } : null
                 };
             });
@@ -329,7 +340,9 @@ const searchDiscovery = async (filters, userId = null) => {
             categorySettings: setting ? {
                 supportsQuantity: setting.supportsQuantity,
                 supportsInclusions: setting.supportsInclusions,
-                isAppointmentBased: setting.isAppointmentBased
+                isAppointmentBased: setting.isAppointmentBased,
+                supportsDailyMenu: setting.supportsDailyMenu,
+                supportsGallery: setting.supportsGallery
             } : null
         };
     });

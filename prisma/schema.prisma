@@ -592,3 +592,10 @@ model Remark {
   @@index([bookingId])
 }
 
+model ServiceUnit {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  isVerified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
