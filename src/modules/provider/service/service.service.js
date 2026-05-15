@@ -5,7 +5,7 @@ const { deleteFile } = require('../../../utils/file.utils');
  * Resolve Category and Subcategory (No longer uses IDs)
  */
 const resolveCategories = async (categoryInput, subcategoriesInput) => {
-    return { 
+    return {
         category: (categoryInput && typeof categoryInput === 'object') ? categoryInput.name : categoryInput,
         subcategories: Array.isArray(subcategoriesInput) ? subcategoriesInput : (subcategoriesInput ? [subcategoriesInput] : [])
     };
@@ -17,7 +17,7 @@ const resolveCategories = async (categoryInput, subcategoriesInput) => {
 const mapServiceCategories = (service) => {
     if (!service) return service;
     const result = { ...service };
-    
+
     // Ensure they are strings for the frontend
     if (service.category && typeof service.category === 'object') {
         result.category = service.category.name;
@@ -25,11 +25,11 @@ const mapServiceCategories = (service) => {
     if (service.subcategories && Array.isArray(service.subcategories)) {
         result.subcategories = service.subcategories;
     }
-    
+
     // Add Labels for exact frontend compatibility
     result.categoryLabel = result.category;
     result.subcategoriesLabel = result.subcategories ? result.subcategories.join(', ') : '';
-    
+
     return result;
 };
 
@@ -38,7 +38,7 @@ const mapServiceCategories = (service) => {
  */
 const CLEAN_DATA = async (data) => {
     const { category, subcategories } = await resolveCategories(data.category, data.subcategories || data.subcategory);
-    
+
     const cleaned = {
         name: data.name,
         description: data.description,
@@ -57,7 +57,7 @@ const CLEAN_DATA = async (data) => {
         gallery: Array.isArray(data.gallery) ? data.gallery : [],
         shopId: data.shopId,
     };
-    
+
     // Remove undefined fields
     Object.keys(cleaned).forEach(key => cleaned[key] === undefined && delete cleaned[key]);
 
@@ -82,10 +82,10 @@ const CLEAN_DATA = async (data) => {
  */
 const createService = async (serviceData) => {
     const data = await CLEAN_DATA(serviceData);
-    
+
     // Extract configurable inclusions if any
     const configurableInclusions = serviceData.configurableInclusions;
-    
+
     if (Array.isArray(configurableInclusions)) {
         data.configurableInclusions = {
             create: configurableInclusions.map(inc => ({
@@ -95,7 +95,7 @@ const createService = async (serviceData) => {
         };
     }
 
-    const service = await prisma.service.create({ 
+    const service = await prisma.service.create({
         data,
         include: { configurableInclusions: true }
     });
@@ -121,11 +121,14 @@ const getServicesByShop = async (shopId, requestingUserId = null) => {
             }
         });
         isOwner = !!shop;
+        console.log(`[SERVICE OWNER CHECK] shopId=${shopId}, userId=${requestingUserId}, isOwner=${isOwner}`);
+    } else {
+        console.log(`[SERVICE OWNER CHECK] shopId=${shopId}, No userId provided — treating as guest`);
     }
 
     // 2. Build explicit where clause
     const where = { shopId };
-    
+
     // If not the owner, strictly filter for Active services only
     if (!isOwner) {
         where.isActive = true;
@@ -136,7 +139,7 @@ const getServicesByShop = async (shopId, requestingUserId = null) => {
         include: { configurableInclusions: true },
         orderBy: { name: 'asc' }
     });
-    
+
     // Fetch all categories to join settings (Prisma doesn't support easy join on non-relation string field)
     const categoryNames = [...new Set(services.map(s => s.category).filter(Boolean))];
     const categorySettings = await prisma.category.findMany({
@@ -192,15 +195,15 @@ const getServiceById = async (id) => {
 const updateService = async (id, serviceData) => {
     // Get existing to check for image changes
     const existing = await prisma.service.findUnique({ where: { id } });
-    
+
     const data = await CLEAN_DATA(serviceData);
-    
+
     // Extract and handle configurable inclusions sync
     const configurableInclusions = serviceData.configurableInclusions;
     if (Array.isArray(configurableInclusions)) {
         // Delete existing and recreate for simplicity in this version
         await prisma.serviceInclusion.deleteMany({ where: { serviceId: id } });
-        
+
         data.configurableInclusions = {
             create: configurableInclusions.map(inc => ({
                 name: inc.name,
@@ -229,7 +232,7 @@ const updateService = async (id, serviceData) => {
 const deleteService = async (id) => {
     try {
         const existing = await prisma.service.findUnique({ where: { id } });
-        
+
         const deleted = await prisma.service.delete({
             where: { id }
         });
@@ -307,7 +310,7 @@ const toggleSoldOut = async (id, userId) => {
         where: { id },
         data: { stock: newStock }
     });
-    
+
     return mapServiceCategories(updated);
 };
 
@@ -320,11 +323,11 @@ const getUniqueUnits = async () => {
         select: { name: true },
         orderBy: { name: 'asc' }
     });
-    
+
     // Default units to always include if table is empty
     const defaultUnits = ['pcs', 'kg', 'gm', 'ltr', 'ml', 'packet', 'plate', 'hour', 'session'];
     const dbUnits = units.map(u => u.name);
-    
+
     // Combine and remove duplicates
     return [...new Set([...defaultUnits, ...dbUnits])].sort();
 };

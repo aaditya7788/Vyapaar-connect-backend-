@@ -240,14 +240,30 @@ class RemarkService {
             take: limit
         });
 
-        // Map shop names for display
-        const items = remarks.map(r => {
+        // Map and enrich with Reporter and Booking details
+        const enrichedItems = await Promise.all(remarks.map(async (r) => {
             const shop = shops.find(s => s.id === r.targetId);
-            return { ...r, shopName: shop?.name };
-        });
+            
+            const reporter = await prisma.user.findUnique({
+                where: { id: r.reporterId },
+                select: { fullName: true, phone: true }
+            });
+
+            const booking = r.bookingId ? await prisma.booking.findUnique({
+                where: { id: r.bookingId },
+                select: { displayId: true }
+            }) : null;
+
+            return { 
+                ...r, 
+                shopName: shop?.name,
+                reporter,
+                booking
+            };
+        }));
 
         return {
-            items,
+            items: enrichedItems,
             meta: {
                 total,
                 page,

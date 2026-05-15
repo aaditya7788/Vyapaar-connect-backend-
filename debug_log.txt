@@ -1,0 +1,7 @@
+{"time":"2026-05-14T14:25:25.728Z","userId":"74de81d0-9ca6-4e55-9495-9ed5a1fa68c9","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":0,"totalCreditsUsed":0,"ordersCount":0,"txCount":0}}
+{"time":"2026-05-14T14:25:32.557Z","userId":"7d3defa2-4042-4c90-80dc-dc0daa5cbc4e","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":0,"totalCreditsUsed":0,"ordersCount":0,"txCount":1}}
+{"time":"2026-05-14T14:26:10.280Z","userId":"7d3defa2-4042-4c90-80dc-dc0daa5cbc4e","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":0,"totalCreditsUsed":0,"ordersCount":0,"txCount":1}}
+{"time":"2026-05-14T14:35:27.293Z","userId":"7d3defa2-4042-4c90-80dc-dc0daa5cbc4e","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":500,"totalCreditsUsed":0,"ordersCount":0,"txCount":1}}
+{"time":"2026-05-14T14:37:54.955Z","userId":"7d3defa2-4042-4c90-80dc-dc0daa5cbc4e","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":500,"totalCreditsUsed":0,"ordersCount":0,"txCount":1}}
+{"time":"2026-05-14T14:38:04.605Z","userId":"7d3defa2-4042-4c90-80dc-dc0daa5cbc4e","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":500,"totalCreditsUsed":0,"ordersCount":0,"txCount":1}}
+{"time":"2026-05-14T14:38:13.053Z","userId":"7d3defa2-4042-4c90-80dc-dc0daa5cbc4e","results":{"totalSpentOnCredits":0,"totalCreditsPurchased":500,"totalCreditsUsed":0,"ordersCount":0,"txCount":1}}

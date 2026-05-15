@@ -418,7 +418,20 @@ const completeProfile = async (userId, { fullName, surname, email, phone, city, 
 /**
  * Send Email OTP
  */
-const sendEmailOtp = async (email) => {
+const sendEmailOtp = async (email, metadata = {}) => {
+  // Check if this is a Pure Admin with MFA enabled on the Admin Platform
+  const user = await prisma.user.findUnique({ where: { email } });
+  const isAdminPlatform = metadata.platform === 'web-admin';
+  const isPureAdmin = user && user.roles.length === 1 && user.roles[0] === 'admin';
+
+  if (isAdminPlatform && isPureAdmin && user.twoFactorEnabled) {
+    return { 
+      message: 'Multi-Factor Authentication Required', 
+      mfaRequired: true,
+      email: user.email
+    };
+  }
+
   const otp = prepareOtp(emailOtps, email);
   
   // Actually send the email using our SES utility
@@ -449,8 +462,28 @@ const verifyEmailOtp = async (email, otp, metadata = {}, forceLogout = false) =>
     }
   });
 
+  // --- ADMIN PERIMETER RULES ---
+  if (metadata.platform === 'web-admin') {
+    if (!user) {
+      throw new Error('Access Denied: Administrative account not found.');
+    }
+    if (!user.roles.includes('admin')) {
+      throw new Error('Access Denied: Administrative privileges required.');
+    }
+    
+    // Force Setup if MFA is not enabled for this admin
+    if (!user.twoFactorEnabled) {
+        return {
+            status: 'success',
+            message: 'MFA Setup Required',
+            mfaSetupRequired: true,
+            email: user.email
+        };
+    }
+  }
+
   if (!user) {
-    // New User Path via Email
+    // New User Path via Email (ONLY for regular app)
     const customerId = await generateId('CUST', 'customerId');
     user = await prisma.user.create({
       data: {
@@ -498,12 +531,22 @@ const verifyEmailOtp = async (email, otp, metadata = {}, forceLogout = false) =>
     await notifyOtherDevicesOfLogout(user.id);
   }
 
+  // ONLY DELETE OTP ON EMAIL SUCCESS
+  emailOtps.delete(email);
+
+  // --- MFA & Admin Checks ---
+  const isPureAdmin = user && user.roles.length === 1 && user.roles[0] === 'admin';
+  if (user.twoFactorEnabled && isPureAdmin) {
+    return {
+      message: 'Multi-Factor Authentication Required',
+      mfaRequired: true,
+      email: user.email
+    };
+  }
+
   const refreshToken = generateRefreshToken(user.id);
   const sessionId = await createSession(user.id, refreshToken, metadata.deviceName, metadata.platform, metadata.ipAddress);
   const accessToken = generateAccessToken(user, sessionId);
-
-  // ONLY DELETE OTP ON FULL SUCCESS
-  emailOtps.delete(email);
 
   return {
     message: 'Verification successful',
@@ -539,6 +582,38 @@ const googleSignin = async (googlePayload, metadata = {}, forceLogout = false) =
       providerProfile: { include: { shops: true } }
     }
   });
+
+  // --- ADMIN HUB SECURITY PERIMETER ---
+  const isAdminPlatform = metadata.platform === 'web-admin';
+  const isPureAdmin = user && user.roles.length === 1 && user.roles[0] === 'admin';
+
+  if (isAdminPlatform) {
+    if (!user || !user.roles.includes('admin')) {
+      const err = new Error('Access Denied: Administrative privileges required.');
+      err.status = 403;
+      throw err;
+    }
+
+    // Only enforce high-security MFA for "Pure Admins"
+    // Hybrid users (e.g. admin + provider) are treated as normal to avoid app conflicts
+    if (isPureAdmin) {
+      if (user.twoFactorEnabled) {
+        return {
+          status: 'success',
+          message: 'Multi-Factor Authentication Required',
+          mfaRequired: true,
+          email: user.email
+        };
+      }
+
+      return {
+        status: 'success',
+        message: 'MFA Setup Required',
+        mfaSetupRequired: true,
+        email: user.email
+      };
+    }
+  }
 
   if (!user) {
     // New User creation
@@ -587,6 +662,15 @@ const googleSignin = async (googlePayload, metadata = {}, forceLogout = false) =
   if (forceLogout) {
     await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
     await notifyOtherDevicesOfLogout(user.id);
+  }
+
+  // --- MFA & Admin Checks ---
+  if (user.twoFactorEnabled && isPureAdmin) {
+    return {
+      message: 'Multi-Factor Authentication Required',
+      mfaRequired: true,
+      email: user.email
+    };
   }
 
   const refreshToken = generateRefreshToken(user.id);
@@ -769,10 +853,12 @@ module.exports = {
   sendEmailOtp,
   verifyEmailOtp,
   googleSignin,
+  createSession,
   listSessions,
   logoutAllOtherDevices,
   logoutSpecificDevice,
   logout,
   refreshAccessToken,
   checkAvailability,
+  notifyOtherDevicesOfLogout,
 };

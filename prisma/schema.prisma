@@ -23,6 +23,8 @@ model User {
   status             String              @default("active")
   isOnline           Boolean             @default(false)
   lastSeen           DateTime?
+  twoFactorSecret    String?
+  twoFactorEnabled   Boolean             @default(false)
   blockReason        String?
   remarkScore        Int                 @default(0)
   createdAt          DateTime            @default(now())

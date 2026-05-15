@@ -107,7 +107,7 @@ const removeGalleryImage = async (req, res) => {
 const getShopServices = async (req, res) => {
   try {
     const { id } = req.params;
-    const services = await providerService.getShopServices(id);
+    const services = await providerService.getShopServices(id, req.user?.id);
     res.status(200).json({ status: 'success', data: services });
   } catch (err) {
     res.status(err.status || 500).json({ status: 'error', message: err.message });

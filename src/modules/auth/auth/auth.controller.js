@@ -79,9 +79,15 @@ const completeProfile = async (req, res) => {
 
 const sendEmailOtp = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, platform } = req.body;
     if (!email) return res.status(400).json({ status: 'fail', message: 'Email is required' });
-    const result = await authService.sendEmailOtp(email);
+    
+    const metadata = {
+      platform,
+      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress
+    };
+
+    const result = await authService.sendEmailOtp(email, metadata);
     res.status(200).json({ status: 'success', ...result });
   } catch (err) {
     if (err.code === 'SESSION_LIMIT_REACHED') {

@@ -477,10 +477,30 @@ module.exports = {
 
 /**
  * Fetch all services for a specific shop
+ * If userId is provided and they own the shop, returns ALL services (active + inactive)
+ * Otherwise, returns only active services
  */
-async function getShopServices(shopId) {
+async function getShopServices(shopId, userId = null) {
+  let isOwner = false;
+
+  if (userId) {
+    const shop = await prisma.shop.findFirst({
+      where: {
+        id: shopId,
+        providerProfile: { userId }
+      }
+    });
+    isOwner = !!shop;
+  }
+
+  const where = { shopId };
+  if (!isOwner) {
+    where.isActive = true;
+  }
+
   const services = await prisma.service.findMany({
-    where: { shopId, isActive: true },
+    where,
+    include: { configurableInclusions: true },
     orderBy: { createdAt: 'desc' }
   });
 

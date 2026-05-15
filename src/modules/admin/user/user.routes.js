@@ -14,6 +14,9 @@ router.use(adminMiddleware);
  */
 router.get('/search', userController.searchUsers);
 router.get('/list', userController.listUsers);
+router.get('/:id', userController.getUserDetails);
+router.get('/:id/bookings', userController.getUserBookings);
+router.get('/:id/transactions', userController.getUserTransactions);
 router.get('/:id/activity', userController.getUserActivity);
 router.patch('/:id/status', userController.updateUserStatus);
 

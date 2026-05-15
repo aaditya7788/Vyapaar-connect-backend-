@@ -15,6 +15,7 @@ const adminWalletRoutes = require('../modules/admin/wallet/wallet.routes');
 const adminNotificationRoutes = require('../modules/admin/notification/notification.routes');
 const adminUserRoutes = require('../modules/admin/user/user.routes');
 const adminSettingsRoutes = require('../modules/admin/settings/settings.routes');
+const adminDashboardRoutes = require('../modules/admin/dashboard/dashboard.routes');
 const addressRoutes = require('../modules/customer/address/address.routes');
 const walletRoutes = require('../modules/provider/wallet/wallet.routes');
 const analyticsRoutes = require('../modules/provider/analytics/analytics.routes');
@@ -46,10 +47,12 @@ router.use('/app', commonSettingsRoutes);
 
 // Admin Routes (Developer Settings)
 router.use('/admin', adminRoutes);
+router.use('/admin/auth/2fa', require('../modules/admin/auth/auth2fa.routes'));
 router.use('/admin/wallet', adminWalletRoutes);
 router.use('/admin/notifications', adminNotificationRoutes);
 router.use('/admin/users', adminUserRoutes);
 router.use('/admin/settings', adminSettingsRoutes);
+router.use('/admin/dashboard', adminDashboardRoutes);
 
 // Auth Routes
 router.use('/auth', authRoutes);

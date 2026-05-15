@@ -287,6 +287,8 @@ class SlotService {
      * Save multiple slot configs in a single transaction.
      */
     async bulkUpsertConfigs(shopId, configs, shouldOverride = false, clearDay = false, targetDay = null, targetDate = null, clearAllHolidays = false) {
+        console.log(`[SLOTS] Bulk Upsert for Shop: ${shopId}, Configs: ${configs.length}, Override: ${shouldOverride}`);
+        
         if (clearAllHolidays) {
             await prisma.shopSlotConfig.deleteMany({
                 where: {
@@ -335,15 +337,31 @@ class SlotService {
             }
         }
 
+        console.log('[SLOTS] Proceeding to Transaction for', configs.length, 'records');
+
         return await prisma.$transaction(
             configs.map((config) => {
                 const { id, dayOfWeek, date, startTime, endTime, slotDuration, maxBookings, isBreak, isActive, label } = config;
+                
                 if (id) {
+                    console.log(`[SLOTS] Updating ID: ${id}, MaxBookings: ${maxBookings}`);
                     return prisma.shopSlotConfig.update({
                         where: { id },
-                        data: { dayOfWeek, date, startTime, endTime, slotDuration, maxBookings, isBreak, isActive, label },
+                        data: { 
+                            dayOfWeek, 
+                            date: date ? new Date(date) : undefined, 
+                            startTime, 
+                            endTime, 
+                            slotDuration: slotDuration ? parseInt(slotDuration) : undefined, 
+                            maxBookings: maxBookings !== undefined ? parseInt(maxBookings) : undefined, 
+                            isBreak, 
+                            isActive, 
+                            label 
+                        },
                     });
                 }
+                
+                console.log(`[SLOTS] Creating New, MaxBookings: ${maxBookings}`);
                 return prisma.shopSlotConfig.create({
                     data: {
                         shopId,
@@ -351,8 +369,8 @@ class SlotService {
                         date: date ? new Date(date) : null,
                         startTime,
                         endTime,
-                        slotDuration: slotDuration || 60,
-                        maxBookings: maxBookings || 1,
+                        slotDuration: parseInt(slotDuration || 60),
+                        maxBookings: parseInt(maxBookings || 1),
                         isBreak: isBreak || false,
                         isActive: isActive ?? true,
                         label
@@ -367,11 +385,22 @@ class SlotService {
      */
     async upsertConfig(shopId, config, shouldOverride = false) {
         const { id, dayOfWeek, date, startTime, endTime, slotDuration, maxBookings, isBreak, isActive, label } = config;
+        console.log(`[SLOTS] Single Upsert for Shop: ${shopId}, ID: ${id}, MaxBookings: ${maxBookings}`);
 
         if (id) {
             return prisma.shopSlotConfig.update({
                 where: { id },
-                data: { dayOfWeek, date, startTime, endTime, slotDuration, maxBookings, isBreak, isActive, label },
+                data: { 
+                    dayOfWeek, 
+                    date: date ? new Date(date) : undefined, 
+                    startTime, 
+                    endTime, 
+                    slotDuration: slotDuration ? parseInt(slotDuration) : undefined, 
+                    maxBookings: maxBookings !== undefined ? parseInt(maxBookings) : undefined, 
+                    isBreak, 
+                    isActive, 
+                    label 
+                },
             });
         }
 
@@ -382,8 +411,8 @@ class SlotService {
                 date: date ? new Date(date) : null,
                 startTime,
                 endTime,
-                slotDuration: slotDuration || 60,
-                maxBookings: maxBookings || 1,
+                slotDuration: parseInt(slotDuration || 60),
+                maxBookings: parseInt(maxBookings || 1),
                 isBreak: isBreak || false,
                 isActive: isActive ?? true,
                 label
