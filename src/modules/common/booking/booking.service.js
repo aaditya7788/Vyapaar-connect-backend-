@@ -373,6 +373,7 @@ class BookingService {
                             })) || booking.services?.map(s => ({ name: s.name, image: s.image, price: s.price })),
                             itemCount: booking.items?.length || booking.services?.length,
                             scheduledTime: booking.scheduledTime,
+                            scheduledDate: booking.scheduledDate,
                             createdAt: booking.createdAt
                         });
 
@@ -542,6 +543,7 @@ class BookingService {
                 })),
                 itemCount: booking.items?.length,
                 scheduledTime: booking.scheduledTime,
+                scheduledDate: booking.scheduledDate,
                 createdAt: booking.createdAt
             });
 
@@ -746,6 +748,7 @@ class BookingService {
                 })) || booking.services?.map(s => ({ name: s.name, image: s.image, price: s.price })),
                 itemCount: booking.items?.length || booking.services?.length,
                 scheduledTime: booking.scheduledTime,
+                scheduledDate: booking.scheduledDate,
                 createdAt: booking.createdAt
             });
 
@@ -1474,6 +1477,149 @@ class BookingService {
     }
 
     /**
+     * Reschedule a pending booking (Customer Edit)
+     */
+    async rescheduleBooking(id, userId, { scheduledDate, scheduledTime }) {
+        const booking = await prisma.booking.findUnique({
+            where: { id },
+            include: { 
+                user: { select: { fullName: true, remarkScore: true } },
+                shop: { include: { providerProfile: true } },
+                items: { include: { service: true } },
+                address: true
+            }
+        });
+
+        if (!booking) throw new Error('Booking not found');
+        if (booking.userId !== userId) throw new Error('Unauthorized');
+        if (booking.status !== 'PENDING' && booking.status !== 'WAITING FOR PROVIDER') {
+            throw new Error('Only pending bookings can be edited');
+        }
+
+        const retryLimit = await this.getGlobalSetting('BOOKING_RETRY_LIMIT', 3);
+        if (booking.totalRetries >= retryLimit) {
+            throw new Error(`Maximum edit limit (${retryLimit}) reached for this booking.`);
+        }
+
+        // Anti Double-Booking Check
+        const startOfDay = new Date(new Date(scheduledDate).setUTCHours(0, 0, 0, 0));
+        const endOfDay = new Date(new Date(scheduledDate).setUTCHours(23, 59, 59, 999));
+
+        const existingInSlot = await prisma.booking.findFirst({
+            where: {
+                shopId: booking.shopId,
+                scheduledDate: { gte: startOfDay, lte: endOfDay },
+                scheduledTime,
+                status: { notIn: ['CANCELLED', 'DECLINED', 'EXPIRED'] },
+                id: { not: booking.id }
+            }
+        });
+
+        if (existingInSlot) {
+            throw new Error('This time slot is taken. Please select a different time.');
+        }
+
+        const now = new Date();
+        const acceptTimeout = await this.getGlobalSetting('ACCEPT_TIMEOUT_MIN', CONFIG.ACCEPT_TIMEOUT_MIN);
+        const nextTimeout = new Date(now.getTime() + acceptTimeout * 60 * 1000);
+        
+        // Notify Provider of old slot cancellation
+        const providerUserId = booking.shop.providerProfile.userId;
+        const templateData = {
+            customerName: booking.user?.fullName || 'Customer',
+            providerName: booking.shop?.name || 'Professional',
+            serviceName: booking.items?.[0]?.service?.name || 'Service',
+            time: booking.scheduledTime,
+            reason: 'Rescheduled by customer'
+        };
+
+        const cancelConfig = BOOKING_NOTIFICATION_MAP['CANCELLED'];
+        if (cancelConfig?.provider) {
+            const providerMsg = {
+                title: typeof cancelConfig.provider.title === 'function' ? cancelConfig.provider.title(templateData) : cancelConfig.provider.title,
+                body: typeof cancelConfig.provider.body === 'function' ? cancelConfig.provider.body(templateData) : cancelConfig.provider.body
+            };
+
+            this._emit(`user_${providerUserId}`, 'booking_updated', {
+                bookingId: id,
+                status: 'CANCELLED',
+                targetContext: 'provider',
+                profileKey: 'CUSTOMER_UPDATE',
+                ...providerMsg
+            });
+
+            sendPushToUser(providerUserId, {
+                title: providerMsg.title,
+                body: providerMsg.body
+            }, {
+                type: 'booking_status',
+                bookingId: id,
+                status: 'CANCELLED',
+                targetContext: 'provider',
+                isDataOnly: true
+            });
+        }
+
+        // Update booking with new date/time and reset timeout/retries
+        const updated = await prisma.booking.update({
+            where: { id },
+            data: {
+                scheduledDate: new Date(scheduledDate),
+                scheduledTime,
+                status: 'PENDING',
+                dispatchTimeoutAt: nextTimeout,
+                totalRetries: { increment: 1 },
+                createdAt: now // Reset creation time for fresh priority
+            },
+            include: {
+                shop: { include: { providerProfile: true } },
+                items: { include: { service: true } },
+                address: true,
+                user: { select: { fullName: true, remarkScore: true } }
+            }
+        });
+
+        // Notify provider of new request
+        this._emit(`user_${providerUserId}`, 'new_booking', {
+            bookingId: updated.id,
+            displayId: updated.displayId,
+            targetContext: 'provider',
+            profileKey: 'PROVIDER_NEW',
+            title: '🔔 REQUEST RESCHEDULED!',
+            body: `${updated.user?.fullName || 'Customer'} has sent a new request for ${updated.items?.[0]?.service?.name || 'a service'} at ${updated.scheduledTime}.`,
+            totalAmount: updated.totalAmount,
+            userName: updated.user?.fullName || 'Customer',
+            userRemarkScore: updated.user?.remarkScore || 0,
+            address: updated.address?.address,
+            latitude: updated.address?.latitude,
+            longitude: updated.address?.longitude,
+            servicesList: updated.items?.map(item => ({
+                name: item.service?.name,
+                image: item.service?.image,
+                price: item.price,
+                quantity: item.quantity,
+                metadata: item.metadata
+            })),
+            itemCount: updated.items?.length,
+            scheduledTime: updated.scheduledTime,
+            scheduledDate: updated.scheduledDate,
+            createdAt: updated.createdAt
+        });
+
+        sendPushToUser(providerUserId, {
+            title: '🔔 Booking Rescheduled!',
+            body: `${updated.user?.fullName || 'A customer'} rescheduled the booking to ${new Date(updated.scheduledDate).toLocaleDateString()} ${updated.scheduledTime}.`
+        }, {
+            type: 'new_booking',
+            bookingId: updated.id,
+            shopId: updated.shopId,
+            targetContext: 'provider'
+        });
+
+        return this._processBooking(updated);
+    }
+
+    /**
      * Retry an EXPIRED booking (On-Demand)
      */
     async retryBooking(id, userId) {
@@ -1538,6 +1684,7 @@ class BookingService {
             })),
             itemCount: updated.items?.length,
             scheduledTime: updated.scheduledTime,
+            scheduledDate: updated.scheduledDate,
             createdAt: updated.createdAt
         });
 

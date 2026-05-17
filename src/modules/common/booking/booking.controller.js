@@ -120,6 +120,23 @@ class BookingController {
             res.status(400).json({ error: error.message || 'Error retrying booking' });
         }
     }
+
+    /**
+     * Reschedule booking
+     */
+    async rescheduleBooking(req, res) {
+        try {
+            const { id } = req.params;
+            const { scheduledDate, scheduledTime } = req.body;
+            const userId = req.user.id;
+            
+            const updatedBooking = await bookingService.rescheduleBooking(id, userId, { scheduledDate, scheduledTime });
+            res.status(200).json({ status: 'success', data: updatedBooking });
+        } catch (error) {
+            console.error('Booking reschedule error:', error);
+            res.status(400).json({ error: error.message || 'Error rescheduling booking' });
+        }
+    }
 }
 
 module.exports = new BookingController();

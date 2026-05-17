@@ -16,6 +16,7 @@ const adminNotificationRoutes = require('../modules/admin/notification/notificat
 const adminUserRoutes = require('../modules/admin/user/user.routes');
 const adminSettingsRoutes = require('../modules/admin/settings/settings.routes');
 const adminDashboardRoutes = require('../modules/admin/dashboard/dashboard.routes');
+const adminBookingRoutes = require('../modules/admin/booking/booking.routes');
 const addressRoutes = require('../modules/customer/address/address.routes');
 const walletRoutes = require('../modules/provider/wallet/wallet.routes');
 const analyticsRoutes = require('../modules/provider/analytics/analytics.routes');
@@ -53,6 +54,7 @@ router.use('/admin/notifications', adminNotificationRoutes);
 router.use('/admin/users', adminUserRoutes);
 router.use('/admin/settings', adminSettingsRoutes);
 router.use('/admin/dashboard', adminDashboardRoutes);
+router.use('/admin/bookings', adminBookingRoutes);
 
 // Auth Routes
 router.use('/auth', authRoutes);

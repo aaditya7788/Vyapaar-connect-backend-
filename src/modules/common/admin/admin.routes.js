@@ -90,4 +90,8 @@ router.patch('/providers/:id/status', authMiddleware, adminMiddleware, adminCont
 router.patch('/reviews/:id/visibility', authMiddleware, adminMiddleware, adminController.toggleReviewVisibility);
 router.delete('/reviews/:id', authMiddleware, adminMiddleware, adminController.removeReview);
 
+// Chat Monitoring
+router.get('/chats', authMiddleware, adminMiddleware, adminController.listChats);
+router.get('/chats/:roomId/history', authMiddleware, adminMiddleware, adminController.getChatHistory);
+
 module.exports = router;

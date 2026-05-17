@@ -45,4 +45,11 @@ router.patch('/:id/status', authMiddleware, bookingController.updateStatus);
  */
 router.post('/:id/retry', authMiddleware, bookingController.retryBooking);
 
+/**
+ * @route   PATCH /api/bookings/:id/reschedule
+ * @desc    Reschedule a pending booking
+ * @access  Private
+ */
+router.patch('/:id/reschedule', authMiddleware, bookingController.rescheduleBooking);
+
 module.exports = router;

@@ -261,7 +261,15 @@ exports.getUserDetails = async (req, res) => {
                 include: {
                     shop: {
                         select: { name: true }
-                    }
+                    },
+                    items: {
+                        include: {
+                            service: {
+                                select: { name: true, unit: true, image: true }
+                            }
+                        }
+                    },
+                    address: true
                 },
                 orderBy: { createdAt: 'desc' },
                 take: 5
@@ -332,7 +340,16 @@ exports.getUserDetails = async (req, res) => {
                     date: b.scheduledDate,
                     time: b.scheduledTime,
                     status: b.status,
-                    amount: b.totalAmount
+                    amount: b.totalAmount,
+                    address: b.address ? `${b.address.name || ''} ${b.address.address}, ${b.address.area || ''}`.trim() : 'N/A',
+                    items: b.items.map(item => ({
+                        id: item.id,
+                        name: item.service.name,
+                        quantity: item.quantity,
+                        unit: item.service.unit,
+                        price: item.price,
+                        image: item.service.image
+                    }))
                 })),
                 transactions: transactions.map(t => ({
                     id: t.id,

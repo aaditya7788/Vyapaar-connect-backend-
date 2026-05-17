@@ -144,6 +144,7 @@ const listShopsForAdmin = async (params = {}) => {
                 category: true,
                 status: true,
                 isFrozen: true,
+                profileImage: true,
                 updatedAt: true,
                 _count: { select: { services: true } },
                 providerProfile: {

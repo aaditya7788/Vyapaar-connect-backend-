@@ -113,16 +113,16 @@ class ChatService {
                     booking: {
                         include: {
                             user: { select: { id: true, fullName: true } },
-                            shop: { 
-                                include: { 
+                            shop: {
+                                include: {
                                     providerProfile: { select: { userId: true } }
-                                } 
+                                }
                             }
                         }
                     }
                 }
             });
-            
+
             if (!room || !room.booking) return;
             const booking = room.booking;
 
@@ -152,7 +152,7 @@ class ChatService {
             // Resolve sender name for display
             let senderName = "User";
             const isProviderSender = (senderId !== booking.userId);
-            
+
             if (isProviderSender) {
                 senderName = booking.shop?.name || "Service Provider";
             } else {
@@ -470,8 +470,8 @@ class ChatService {
         const isProvider = Array.isArray(roles) && roles.includes('provider');
         const skip = (page - 1) * limit;
 
-        const activeTimeoutHours = await prisma.globalSettings.findUnique({ 
-            where: { key: 'ACTIVE_TIMEOUT_HOURS' } 
+        const activeTimeoutHours = await prisma.globalSettings.findUnique({
+            where: { key: 'ACTIVE_TIMEOUT_HOURS' }
         }).then(s => s ? parseFloat(s.value) : 24);
 
         // Find rooms where the user is either the customer (booking.userId)
@@ -525,14 +525,14 @@ class ChatService {
                     booking: {
                         include: {
                             user: { select: { id: true, fullName: true, avatar: true } },
-                            shop: { 
-                                include: { 
-                                    providerProfile: { 
-                                        include: { 
-                                            user: { select: { id: true, fullName: true, avatar: true } } 
-                                        } 
-                                    } 
-                                } 
+                            shop: {
+                                include: {
+                                    providerProfile: {
+                                        include: {
+                                            user: { select: { id: true, fullName: true, avatar: true } }
+                                        }
+                                    }
+                                }
                             }
                         }
                     },
@@ -577,6 +577,102 @@ class ChatService {
             totalCount,
             totalPages: Math.ceil(totalCount / limit),
             currentPage: parseInt(page)
+        };
+    }
+
+    /**
+     * Get all chat rooms for Admin monitoring.
+     */
+    async listAllChatRoomsForAdmin({
+        page = 1,
+        limit = 50,
+        search = '',
+        bookingId = '',
+        customerName = '',
+        shopName = '',
+        date = '',
+        status = '' // Optional status filter
+    }) {
+        const skip = (page - 1) * limit;
+        const where = {
+            AND: []
+        };
+
+        // If a specific status is requested (e.g. from a dropdown in future)
+        if (status) {
+            where.AND.push({ booking: { status } });
+        }
+
+        // Global Search (across participants and content)
+        if (search) {
+            where.AND.push({
+                OR: [
+                    { booking: { displayId: { contains: search, mode: 'insensitive' } } },
+                    { booking: { user: { fullName: { contains: search, mode: 'insensitive' } } } },
+                    { booking: { shop: { name: { contains: search, mode: 'insensitive' } } } },
+                    { messages: { some: { content: { contains: search, mode: 'insensitive' } } } }
+                ]
+            });
+        }
+
+        // Specific Filters
+        if (bookingId) {
+            where.AND.push({ booking: { displayId: { contains: bookingId, mode: 'insensitive' } } });
+        }
+        if (customerName) {
+            where.AND.push({ booking: { user: { fullName: { contains: customerName, mode: 'insensitive' } } } });
+        }
+        if (shopName) {
+            where.AND.push({ booking: { shop: { name: { contains: shopName, mode: 'insensitive' } } } });
+        }
+        if (date) {
+            const startOfDay = new Date(date);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(date);
+            endOfDay.setHours(23, 59, 59, 999);
+            where.AND.push({
+                updatedAt: { gte: startOfDay, lte: endOfDay }
+            });
+        }
+
+        const [rooms, totalCount] = await Promise.all([
+            prisma.chatRoom.findMany({
+                where,
+                take: limit,
+                skip: skip,
+                include: {
+                    booking: {
+                        select: {
+                            id: true,
+                            displayId: true,
+                            scheduledDate: true,
+                            status: true,
+                            user: { select: { id: true, fullName: true, avatar: true } },
+                            shop: { select: { id: true, name: true, profileImage: true } }
+                        }
+                    },
+                    messages: {
+                        take: 1,
+                        orderBy: { createdAt: 'desc' }
+                    }
+                },
+                orderBy: { updatedAt: 'desc' }
+            }),
+            prisma.chatRoom.count({ where })
+        ]);
+
+        return {
+            data: rooms.map(room => ({
+                ...room,
+                lastMessage: room.messages[0] || null,
+                participants: [room.booking.user.fullName, room.booking.shop.name]
+            })),
+            pagination: {
+                totalCount,
+                totalPages: Math.ceil(totalCount / limit),
+                currentPage: parseInt(page),
+                limit: parseInt(limit)
+            }
         };
     }
 }

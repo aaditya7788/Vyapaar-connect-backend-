@@ -1,4 +1,5 @@
 const adminService = require('./admin.service');
+const chatService = require('../chat/chat.service');
 
 const getHomeCategories = async (req, res) => {
   try {
@@ -184,6 +185,26 @@ const removeReview = async (req, res) => {
   }
 };
 
+const listChats = async (req, res) => {
+  try {
+    const result = await chatService.listAllChatRoomsForAdmin(req.query);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
+const getChatHistory = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { limit, before } = req.query;
+    const result = await chatService.getHistory(roomId, limit, before);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+};
+
 module.exports = {
   getHomeCategories,
   updateCategoriesOrder,
@@ -202,5 +223,7 @@ module.exports = {
   updateProviderStatus,
   updateShopStatus,
   toggleReviewVisibility,
-  removeReview
+  removeReview,
+  listChats,
+  getChatHistory
 };
